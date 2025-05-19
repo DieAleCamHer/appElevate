@@ -10,6 +10,7 @@ import {
   Alert,
   Modal
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import {
   collection,
   addDoc,
@@ -18,24 +19,32 @@ import {
   getDocs,
   deleteDoc,
   doc,
-  Timestamp
+  Timestamp,
+  updateDoc,
+  getDoc
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../firebaseConfig';
+import {
+  calcularAvanceSubtareas,
+  calcularAvanceTareas
+} from '../utils/calcularPorcentaje';
 
 const SubtareasTarea = ({ route }) => {
   const { tareaId, userId, userEmail, proyectoId } = route.params;
   const [subtareas, setSubtareas] = useState([]);
   const [nombre, setNombre] = useState('');
-
   const [modalVisible, setModalVisible] = useState(false);
   const [subtareaAEliminar, setSubtareaAEliminar] = useState(null);
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [fechaEntregaTarea, setFechaEntregaTarea] = useState('');
+  const [fechaEntrega, setFechaEntrega] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   useEffect(() => {
-    console.log("📬 Email recibido:", userEmail);
     obtenerSubtareas();
+    obtenerFechaEntregaTarea();
   }, []);
 
   const obtenerSubtareas = async () => {
@@ -49,9 +58,39 @@ const SubtareasTarea = ({ route }) => {
     }
   };
 
+  const obtenerFechaEntregaTarea = async () => {
+    try {
+      const tareaRef = doc(db, 'tareas', tareaId);
+      const snap = await getDoc(tareaRef);
+      if (snap.exists()) {
+        setFechaEntregaTarea(snap.data().fechaEntrega || '');
+      }
+    } catch (err) {
+      console.error('Error al obtener fecha de la tarea:', err);
+    }
+  };
+
+  const actualizarAvance = async () => {
+    try {
+      const avanceTarea = await calcularAvanceSubtareas(tareaId);
+      const tareaRef = doc(db, 'tareas', tareaId);
+      await updateDoc(tareaRef, { avance: avanceTarea });
+
+      const avanceProyecto = await calcularAvanceTareas(proyectoId);
+      const proyectoRef = doc(db, 'proyectos', proyectoId);
+      await updateDoc(proyectoRef, { avance: avanceProyecto });
+    } catch (error) {
+      console.error('Error al actualizar porcentaje:', error);
+    }
+  };
+
   const crearSubtarea = async () => {
     if (!nombre) {
       Alert.alert('Error', 'El nombre es obligatorio.');
+      return;
+    }
+    if (fechaEntregaTarea && fechaEntrega > new Date(fechaEntregaTarea)) {
+      Alert.alert('Error', 'La fecha de la subtarea no puede superar la de la tarea.');
       return;
     }
 
@@ -60,10 +99,12 @@ const SubtareasTarea = ({ route }) => {
         nombre,
         tareaId,
         completado: false,
+        fechaEntrega: fechaEntrega.toISOString(),
         fechaCreacion: Timestamp.now()
       });
       setNombre('');
-      obtenerSubtareas();
+      await obtenerSubtareas();
+      await actualizarAvance();
     } catch (error) {
       Alert.alert('Error al crear la subtarea.');
       console.error(error);
@@ -71,9 +112,7 @@ const SubtareasTarea = ({ route }) => {
   };
 
   const confirmarEliminacion = async () => {
-    console.log("🚀 ENTRANDO A confirmarEliminacion()");
     const email = userEmail;
-    console.log("🔐 Intentando confirmar eliminación con:", email);
 
     if (!email) {
       Alert.alert("Error", "No se pudo obtener el correo del usuario autenticado.");
@@ -87,14 +126,13 @@ const SubtareasTarea = ({ route }) => {
 
     try {
       await signInWithEmailAndPassword(auth, email, confirmPassword);
-      console.log("✅ Autenticación exitosa, eliminando subtarea:", subtareaAEliminar);
       await deleteDoc(doc(db, 'subtareas', subtareaAEliminar));
       Alert.alert('Subtarea eliminada correctamente');
       setModalVisible(false);
       setConfirmPassword('');
-      obtenerSubtareas();
+      await obtenerSubtareas();
+      await actualizarAvance();
     } catch (error) {
-      console.log("❌ Error al eliminar subtarea:", error);
       Alert.alert('Error', 'Contraseña incorrecta o fallo de conexión');
       setConfirmPassword('');
     }
@@ -110,6 +148,21 @@ const SubtareasTarea = ({ route }) => {
         onChangeText={setNombre}
         style={styles.input}
       />
+
+      <Button title="Seleccionar fecha de entrega" onPress={() => setShowDatePicker(true)} />
+      {showDatePicker && (
+        <DateTimePicker
+          value={fechaEntrega}
+          mode="date"
+          display="default"
+          minimumDate={new Date(Date.now() + 86400000)}
+          onChange={(event, selectedDate) => {
+            setShowDatePicker(false);
+            if (selectedDate) setFechaEntrega(selectedDate);
+          }}
+        />
+      )}
+
       <Button title="Crear Subtarea" onPress={crearSubtarea} />
 
       <FlatList
@@ -119,11 +172,11 @@ const SubtareasTarea = ({ route }) => {
           <View style={styles.item}>
             <Text style={styles.itemText}>{item.nombre}</Text>
             <Text>{item.completado ? '✅ Completado' : '⏳ Pendiente'}</Text>
+            <Text>Entrega: {item.fechaEntrega ? new Date(item.fechaEntrega).toLocaleDateString() : 'N/A'}</Text>
             <Button
               title="Eliminar"
               color="red"
               onPress={() => {
-                console.log("🗑 Presionado eliminar subtarea:", item.id);
                 setSubtareaAEliminar(item.id);
                 setModalVisible(true);
               }}
@@ -146,18 +199,7 @@ const SubtareasTarea = ({ route }) => {
               value={confirmPassword}
               onChangeText={setConfirmPassword}
             />
-            <Button
-              title="Confirmar eliminación"
-              onPress={() => {
-                try {
-                  console.log("🧪 CLICK EN CONFIRMAR");
-                  confirmarEliminacion();
-                } catch (err) {
-                  console.log("❗ Error externo en onPress:", err);
-                  Alert.alert("Error inesperado", err.message);
-                }
-              }}
-            />
+            <Button title="Confirmar eliminación" onPress={confirmarEliminacion} />
             <View style={{ marginTop: 10 }}>
               <Button
                 title="Cancelar"

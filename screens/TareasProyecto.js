@@ -9,7 +9,8 @@ import {
   StyleSheet,
   Alert,
   Modal,
-  ScrollView
+  ScrollView,
+  TouchableOpacity
 } from 'react-native';
 import {
   collection,
@@ -21,17 +22,20 @@ import {
   doc,
   Timestamp,
   updateDoc,
-  arrayUnion
+  arrayUnion,
+  arrayRemove,
+  getDoc
 } from 'firebase/firestore';
-import { auth } from '../firebaseConfig';
-import { db } from '../firebaseConfig';
+import { auth, db } from '../firebaseConfig';
 import { signInWithEmailAndPassword } from 'firebase/auth';
+import ModalConfirmacion from '../components/ModalConfirmacion';
 
 const TareasProyecto = ({ route, navigation }) => {
   const { proyectoId, userId } = route.params;
   const [tareas, setTareas] = useState([]);
   const [nombre, setNombre] = useState('');
   const [descripcion, setDescripcion] = useState('');
+  const [fechaEntregaProyecto, setFechaEntregaProyecto] = useState('');
 
   const [modalVisible, setModalVisible] = useState(false);
   const [tareaAEliminar, setTareaAEliminar] = useState(null);
@@ -44,6 +48,20 @@ const TareasProyecto = ({ route, navigation }) => {
 
   const [modalVerMiembrosVisible, setModalVerMiembrosVisible] = useState(false);
   const [miembrosAsignados, setMiembrosAsignados] = useState([]);
+  const [modalEliminarMiembro, setModalEliminarMiembro] = useState(false);
+  const [miembroAEliminar, setMiembroAEliminar] = useState(null);
+
+  const obtenerFechaEntregaProyecto = async () => {
+    try {
+      const proyectoRef = doc(db, 'proyectos', proyectoId);
+      const snap = await getDoc(proyectoRef);
+      if (snap.exists()) {
+        setFechaEntregaProyecto(snap.data().fechaEntrega || '');
+      }
+    } catch (err) {
+      console.error('Error al obtener fecha de entrega del proyecto:', err);
+    }
+  };
 
   const obtenerTareas = async () => {
     try {
@@ -68,7 +86,9 @@ const TareasProyecto = ({ route, navigation }) => {
         descripcion,
         proyectoId,
         creadorId: userId,
-        fechaCreacion: Timestamp.now()
+        fechaCreacion: Timestamp.now(),
+        fechaEntrega: fechaEntregaProyecto,
+        miembros: []
       });
       setNombre('');
       setDescripcion('');
@@ -81,33 +101,23 @@ const TareasProyecto = ({ route, navigation }) => {
 
   const confirmarEliminacion = async () => {
     const email = auth.currentUser?.email;
-    console.log("🔐 Intentando confirmar eliminación con:", email);
-  
-    if (!email) {
-      Alert.alert("Error", "No se pudo obtener el correo del usuario autenticado.");
+    if (!email || !confirmPassword) {
+      Alert.alert("Error", "Datos incompletos para confirmar.");
       return;
     }
-  
-    if (!confirmPassword) {
-      Alert.alert("Error", "Por favor ingresa tu contraseña.");
-      return;
-    }
-  
+
     try {
       await signInWithEmailAndPassword(auth, email, confirmPassword);
-      console.log("✅ Autenticación exitosa, procediendo a eliminar tarea:", tareaAEliminar);
       await deleteDoc(doc(db, 'tareas', tareaAEliminar));
       Alert.alert('Tarea eliminada correctamente');
       setModalVisible(false);
       setConfirmPassword('');
       obtenerTareas();
     } catch (error) {
-      console.log("❌ Error al eliminar tarea:", error);
       Alert.alert('Error', 'Contraseña incorrecta o fallo de conexión');
       setConfirmPassword('');
     }
   };
-  
 
   const obtenerMiembros = async () => {
     try {
@@ -141,10 +151,10 @@ const TareasProyecto = ({ route, navigation }) => {
     }
   };
 
-  const verMiembrosAsignados = async (miembrosUIDs) => {
+  const verMiembrosAsignados = async (miembrosUIDs, tarea) => {
     try {
+      setTareaSeleccionada(tarea);
       const validUIDs = miembrosUIDs?.filter(uid => uid && uid.trim() !== '') || [];
-
       if (validUIDs.length === 0) {
         setMiembrosAsignados([]);
         setModalVerMiembrosVisible(true);
@@ -153,7 +163,7 @@ const TareasProyecto = ({ route, navigation }) => {
 
       const q = query(collection(db, 'usuarios'), where('__name__', 'in', validUIDs));
       const querySnapshot = await getDocs(q);
-      const miembros = querySnapshot.docs.map(doc => doc.data());
+      const miembros = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setMiembrosAsignados(miembros);
       setModalVerMiembrosVisible(true);
     } catch (error) {
@@ -161,13 +171,31 @@ const TareasProyecto = ({ route, navigation }) => {
     }
   };
 
+  const eliminarMiembroDeTarea = async () => {
+    try {
+      const tareaRef = doc(db, 'tareas', tareaSeleccionada.id);
+      await updateDoc(tareaRef, {
+        miembros: arrayRemove(miembroAEliminar)
+      });
+      Alert.alert("Miembro eliminado de la tarea");
+      setModalEliminarMiembro(false);
+      setMiembroAEliminar(null);
+      obtenerTareas();
+    } catch (error) {
+      console.error("Error al eliminar miembro de la tarea:", error);
+    }
+  };
+
   useEffect(() => {
     obtenerTareas();
+    obtenerFechaEntregaProyecto();
   }, []);
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Tareas del Proyecto</Text>
+
+      <Text style={{ marginBottom: 5 }}>Fecha de entrega del proyecto: {fechaEntregaProyecto ? new Date(fechaEntregaProyecto).toLocaleDateString() : 'No definida'}</Text>
 
       <TextInput
         placeholder="Nombre de la tarea"
@@ -190,97 +218,60 @@ const TareasProyecto = ({ route, navigation }) => {
           <View style={styles.tareaItem}>
             <Text style={styles.tareaNombre}>{item.nombre}</Text>
             <Text>{item.descripcion}</Text>
-            <Button
-              title="Eliminar"
-              color="red"
-              onPress={() => {
-                setTareaAEliminar(item.id);
-                setModalVisible(true);
-              }}
-            />
-            <Button
-              title="Asignar miembros"
-              onPress={() => {
-                setTareaSeleccionada(item);
-                obtenerMiembros();
-                setModalAsignarVisible(true);
-              }}
-            />
-            <Button
-              title="Ver miembros asignados"
-              onPress={() => verMiembrosAsignados(item.miembros || [])}
-            />
-            <Button
-              title="Ver subtareas"
-              onPress={() => navigation.navigate('SubtareasTarea', {
-                tareaId: item.id,
-                userId: userId,
-                userEmail: auth.currentUser?.email, // 🔥 asegúrate de pasar esto
-                proyectoId: proyectoId
-              })}
-            />
+            <Text>Avance: {(typeof item.avance === 'number' ? item.avance : 0)}%</Text>
+            <Button title="Eliminar" color="red" onPress={() => {
+              setTareaAEliminar(item.id);
+              setModalVisible(true);
+            }} />
+            <Button title="Asignar miembros" onPress={() => {
+              setTareaSeleccionada(item);
+              obtenerMiembros();
+              setModalAsignarVisible(true);
+            }} />
+            <Button title="Ver miembros asignados" onPress={() => verMiembrosAsignados(item.miembros || [], item)} />
+            <Button title="Ver subtareas" onPress={() => navigation.navigate('SubtareasTarea', {
+              tareaId: item.id,
+              userId,
+              userEmail: auth.currentUser?.email,
+              proyectoId
+            })} />
           </View>
         )}
         style={{ marginTop: 20 }}
       />
-{/*Modal de eliminacion con contraseña*/ }
-<Modal visible={modalVisible} transparent animationType="fade">
-  <View style={styles.modalOverlay}>
-    <View style={styles.modalContent}>
-      <Text style={styles.modalTitle}>¿Estás seguro que deseas eliminar esta tarea?</Text>
-      <TextInput
-        placeholder="Confirma tu contraseña"
-        secureTextEntry
-        style={styles.input}
-        value={confirmPassword}
-        onChangeText={setConfirmPassword}
-      />
-      <Button
-        title="Confirmar eliminación"
-        onPress={() => {
-          console.log("🧪 CLICK EN CONFIRMAR");
-          confirmarEliminacion();
-        }}
-      />
-      <View style={{ marginTop: 10 }}>
-        <Button
-          title="Cancelar"
-          onPress={() => {
-            setModalVisible(false);
-            setConfirmPassword('');
-          }}
-        />
-      </View>
-    </View>
-  </View>
-</Modal>
 
+      <ModalConfirmacion
+        visible={modalVisible}
+        setVisible={setModalVisible}
+        confirmPassword={confirmPassword}
+        setConfirmPassword={setConfirmPassword}
+        onConfirm={confirmarEliminacion}
+        titulo="¿Estás seguro que deseas eliminar esta tarea?"
+      />
 
-      {/* Modal para asignar miembros */}
+      {/* Asignar miembros */}
       <Modal visible={modalAsignarVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Asignar miembro a la tarea</Text>
             <ScrollView>
               {miembrosDisponibles.map((miembro) => (
-                <View key={miembro.id} style={{ marginBottom: 10 }}>
-                  <Button
-                    title={`${miembro.nombre} (${miembro.username})`}
-                    onPress={() => setMiembroSeleccionado(miembro.id)}
-                    color={miembroSeleccionado === miembro.id ? 'green' : undefined}
-                  />
-                </View>
+                <TouchableOpacity
+                  key={miembro.id}
+                  onPress={() => setMiembroSeleccionado(miembro.id)}
+                  style={[styles.memberButton, miembroSeleccionado === miembro.id && styles.selectedButton]}
+                >
+                  <Text style={styles.memberText}>{miembro.nombre} ({miembro.username})</Text>
+                </TouchableOpacity>
               ))}
             </ScrollView>
             <Button title="Confirmar asignación" onPress={asignarMiembro} />
-            <View style={{ marginTop: 10 }}>
-              <Button title="Cancelar" onPress={() => setModalAsignarVisible(false)} />
-            </View>
+            <Button title="Cancelar" onPress={() => setModalAsignarVisible(false)} />
           </View>
         </View>
       </Modal>
 
-      {/* Modal para ver miembros asignados */}
+      {/* Ver miembros asignados */}
       <Modal visible={modalVerMiembrosVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -290,13 +281,30 @@ const TareasProyecto = ({ route, navigation }) => {
                 <Text>No hay miembros asignados.</Text>
               ) : (
                 miembrosAsignados.map((miembro, index) => (
-                  <Text key={index}>- {miembro.nombre} ({miembro.username})</Text>
+                  <TouchableOpacity
+                    key={index}
+                    onLongPress={() => {
+                      setMiembroAEliminar(miembro.id);
+                      setModalVerMiembrosVisible(false);
+                      setModalEliminarMiembro(true);
+                    }}
+                  >
+                    <Text>- {miembro.nombre} ({miembro.username})</Text>
+                  </TouchableOpacity>
                 ))
               )}
             </ScrollView>
-            <View style={{ marginTop: 10 }}>
-              <Button title="Cerrar" onPress={() => setModalVerMiembrosVisible(false)} />
-            </View>
+            <Button title="Cerrar" onPress={() => setModalVerMiembrosVisible(false)} />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={modalEliminarMiembro} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>¿Eliminar este miembro de la tarea?</Text>
+            <Button title="Eliminar" onPress={eliminarMiembroDeTarea} color="red" />
+            <Button title="Cancelar" onPress={() => setModalEliminarMiembro(false)} />
           </View>
         </View>
       </Modal>
@@ -340,6 +348,19 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 16,
     marginBottom: 10
+  },
+  memberButton: {
+    backgroundColor: '#007BFF',
+    padding: 10,
+    borderRadius: 5,
+    marginBottom: 8
+  },
+  selectedButton: {
+    backgroundColor: 'green'
+  },
+  memberText: {
+    color: 'white',
+    textAlign: 'center'
   }
 });
 
