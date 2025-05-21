@@ -1,13 +1,16 @@
-// screens/SubtareasMiembro.js
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, FlatList, Button, StyleSheet, Modal, TextInput, Alert, TouchableOpacity, ScrollView
+  View, Text, FlatList, StyleSheet, Modal, TextInput, Alert, TouchableOpacity, 
+  ScrollView, StatusBar, ActivityIndicator, ImageBackground
 } from 'react-native';
 import {
-  collection, query, where, getDocs, updateDoc, doc, addDoc, Timestamp, getDoc, arrayRemove
+  collection, query, where, getDocs, updateDoc, doc, addDoc, Timestamp, getDoc
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { ESTADOS, listaEstados } from '../utils/estados';
+import { calcularAvanceSubtareas, calcularAvanceTareas } from '../utils/calcularPorcentaje';
+import { LinearGradient } from 'expo-linear-gradient';
+import { MaterialIcons, AntDesign } from '@expo/vector-icons';
 
 const SubtareasMiembro = ({ route }) => {
   const { tareaId, userId, proyectoId } = route.params;
@@ -17,18 +20,29 @@ const SubtareasMiembro = ({ route }) => {
   const [subtareaSeleccionada, setSubtareaSeleccionada] = useState(null);
   const [nuevoEstado, setNuevoEstado] = useState('');
   const [userInfo, setUserInfo] = useState(null);
-  const [modalEliminarMiembro, setModalEliminarMiembro] = useState(false);
-  const [miembroSeleccionado, setMiembroSeleccionado] = useState(null);
-  const [miembrosAsignados, setMiembrosAsignados] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   const obtenerSubtareas = async () => {
     try {
       const q = query(collection(db, 'subtareas'), where('tareaId', '==', tareaId));
       const snapshot = await getDocs(q);
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const data = snapshot.docs.map(doc => {
+        const datos = doc.data();
+        return {
+          id: doc.id,
+          ...datos,
+          completado: 'completado' in datos ? datos.completado : false,
+          fechaEntrega: datos.fechaEntrega && typeof datos.fechaEntrega.toDate === 'function'
+            ? datos.fechaEntrega.toDate()
+            : null
+        };
+      });
       setSubtareas(data);
     } catch (error) {
       console.error('Error al obtener subtareas:', error);
+      Alert.alert('Error', 'No se pudieron cargar las subtareas');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -64,7 +78,10 @@ const SubtareasMiembro = ({ route }) => {
 
       if (nuevoEstado === ESTADOS.FINALIZADO) {
         const hoy = new Date();
-        const fechaEntrega = subtareaData?.fechaEntrega ? new Date(subtareaData.fechaEntrega) : null;
+        const fechaEntrega = subtareaData?.fechaEntrega && typeof subtareaData.fechaEntrega.toDate === 'function'
+          ? subtareaData.fechaEntrega.toDate()
+          : null;
+
         if (fechaEntrega && hoy > fechaEntrega) {
           estadoFinal = ESTADOS.ENTREGA_TARDIA;
         }
@@ -87,14 +104,40 @@ const SubtareasMiembro = ({ route }) => {
         fechaCambio: Timestamp.now()
       });
 
+      await calcularAvanceSubtareas(tareaId);
+      await calcularAvanceTareas(proyectoId);
+
       setModalVisible(false);
       setComentario('');
       setNuevoEstado('');
       setSubtareaSeleccionada(null);
       obtenerSubtareas();
+      Alert.alert('Éxito', 'Estado actualizado correctamente');
     } catch (error) {
       console.error('Error al cambiar estado:', error);
+      Alert.alert('Error', 'No se pudo actualizar el estado');
     }
+  };
+
+  const getEstadoColor = (estado) => {
+    switch(estado) {
+      case ESTADOS.PENDIENTE: return '#FFA000';
+      case ESTADOS.EN_PROGRESO: return '#2196F3';
+      case ESTADOS.FINALIZADO: return '#4CAF50';
+      case ESTADOS.ENTREGA_TARDIA: return '#F44336';
+      default: return '#9E9E9E';
+    }
+  };
+
+  const formatFecha = (fecha) => {
+    if (!fecha) return 'Sin fecha definida';
+    return fecha.toLocaleDateString('es-ES', { 
+      day: '2-digit', 
+      month: '2-digit', 
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
   useEffect(() => {
@@ -103,125 +146,385 @@ const SubtareasMiembro = ({ route }) => {
   }, []);
 
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.title}>📋 Mis Subtareas</Text>
-      <FlatList
-        data={subtareas}
-        keyExtractor={item => item.id}
-        renderItem={({ item }) => (
-          <View style={styles.item}>
-            <Text style={styles.nombre}>{item.nombre}</Text>
-            <Text style={styles.estado}>Estado: {item.estado || 'pendiente'}</Text>
-            <TouchableOpacity
-              style={styles.btnEstado}
-              onPress={() => {
-                setSubtareaSeleccionada(item);
-                setModalVisible(true);
-              }}
-            >
-              <Text style={styles.btnEstadoTexto}>Cambiar Estado</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      />
+    <ImageBackground 
+      source={require('../assets/logo.png')} 
+      style={styles.background}
+      resizeMode="cover"
+    >
+      <StatusBar barStyle="light-content" backgroundColor="#0D47A1" />
+      <View style={styles.container}>
+        <LinearGradient
+          colors={['#0D47A1', '#1976D2']}
+          style={styles.header}
+        >
+          <Text style={styles.title}>Subtareas Asignadas</Text>
+          <Text style={styles.subtitle}>
+            {subtareas.length} {subtareas.length === 1 ? 'subtarea' : 'subtareas'} en total
+          </Text>
+        </LinearGradient>
 
-      <Modal visible={modalVisible} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Actualizar Estado</Text>
-            {listaEstados.map((estado) => (
-              <TouchableOpacity
-                key={estado}
-                onPress={() => setNuevoEstado(estado)}
-                style={[styles.estadoBtn, nuevoEstado === estado && styles.estadoBtnSeleccionado]}
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#0D47A1" />
+            <Text style={styles.loadingText}>Cargando subtareas...</Text>
+          </View>
+        ) : subtareas.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <MaterialIcons name="assignment" size={50} color="#90A4AE" />
+            <Text style={styles.emptyText}>No tienes subtareas asignadas</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={subtareas}
+            keyExtractor={item => item.id}
+            contentContainerStyle={styles.listContent}
+            renderItem={({ item }) => (
+              <TouchableOpacity 
+                style={styles.card}
+                onPress={() => {
+                  setSubtareaSeleccionada(item);
+                  setModalVisible(true);
+                }}
               >
-                <Text style={styles.estadoBtnTexto}>{estado}</Text>
+                <View style={styles.cardHeader}>
+                  <MaterialIcons 
+                    name="assignment" 
+                    size={24} 
+                    color={getEstadoColor(item.estado)} 
+                  />
+                  <Text style={styles.cardTitle}>{item.nombre}</Text>
+                </View>
+                
+                <View style={styles.cardBody}>
+                  <View style={styles.statusBadge(item.estado)}>
+                    <Text style={styles.statusText}>{item.estado || 'pendiente'}</Text>
+                  </View>
+                  
+                  {item.descripcion && (
+                    <Text style={styles.description}>{item.descripcion}</Text>
+                  )}
+                  
+                  {item.fechaEntrega && (
+                    <View style={styles.dateContainer}>
+                      <MaterialIcons name="schedule" size={16} color="#757575" />
+                      <Text style={styles.dateText}>
+                        Entrega: {formatFecha(item.fechaEntrega)}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                
+                <View style={styles.cardFooter}>
+                  <Text style={styles.actionText}>Toca para cambiar estado</Text>
+                  <AntDesign name="right" size={16} color="#0D47A1" />
+                </View>
               </TouchableOpacity>
-            ))}
-            <TextInput
-              placeholder="Comentario obligatorio"
-              style={styles.input}
-              value={comentario}
-              onChangeText={setComentario}
-            />
-            <Button title="Guardar" onPress={cambiarEstado} />
-            <View style={{ marginTop: 10 }}>
-              <Button title="Cancelar" onPress={() => setModalVisible(false)} />
+            )}
+          />
+        )}
+
+        {/* Modal */}
+        <Modal visible={modalVisible} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Actualizar Estado</Text>
+              <Text style={styles.modalSubtitle}>{subtareaSeleccionada?.nombre}</Text>
+              
+              <ScrollView style={styles.estadosContainer}>
+                {listaEstados.map((estado) => (
+                  <TouchableOpacity
+                    key={estado}
+                    onPress={() => setNuevoEstado(estado)}
+                    style={[
+                      styles.estadoBtn, 
+                      nuevoEstado === estado && styles.estadoBtnSeleccionado(estado)
+                    ]}
+                  >
+                    <MaterialIcons 
+                      name={
+                        estado === ESTADOS.PENDIENTE ? 'pending-actions' :
+                        estado === ESTADOS.EN_PROGRESO ? 'hourglass-full' :
+                        estado === ESTADOS.FINALIZADO ? 'check-circle' :
+                        'warning'
+                      } 
+                      size={20} 
+                      color={getEstadoColor(estado)} 
+                    />
+                    <Text style={styles.estadoBtnTexto}>{estado}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              
+              <Text style={styles.inputLabel}>Comentario (requerido)</Text>
+              <TextInput
+                placeholder="Explica el cambio de estado..."
+                placeholderTextColor="#90A4AE"
+                style={styles.input}
+                value={comentario}
+                onChangeText={setComentario}
+                multiline
+                numberOfLines={3}
+              />
+              
+              <View style={styles.modalButtons}>
+                <TouchableOpacity 
+                  style={styles.cancelButton}
+                  onPress={() => {
+                    setModalVisible(false);
+                    setComentario('');
+                    setNuevoEstado('');
+                  }}
+                >
+                  <Text style={styles.cancelButtonText}>Cancelar</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={styles.saveButton}
+                  onPress={cambiarEstado}
+                  disabled={!nuevoEstado || !comentario}
+                >
+                  <Text style={styles.saveButtonText}>Guardar Cambios</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
-      </Modal>
-    </ScrollView>
+        </Modal>
+      </View>
+    </ImageBackground>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { padding: 20, marginTop: 40 },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
-  item: {
-    backgroundColor: '#e6f0ff',
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 10,
-    elevation: 2
+  background: {
+    flex: 1,
   },
-  nombre: {
-    fontWeight: 'bold',
-    fontSize: 18,
-    marginBottom: 5
+  container: {
+    flex: 1,
   },
-  estado: {
+  header: {
+    padding: 24,
+    paddingTop: 50,
+    paddingBottom: 20,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#FFFFFF',
     marginBottom: 8,
-    fontSize: 14
   },
-  btnEstado: {
-    backgroundColor: '#007BFF',
-    padding: 10,
-    borderRadius: 5
+  subtitle: {
+    fontSize: 16,
+    color: '#E3F2FD',
+    opacity: 0.9,
   },
-  btnEstadoTexto: {
-    color: 'white',
+  listContent: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    color: '#0D47A1',
+    fontSize: 16,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  emptyText: {
+    marginTop: 16,
+    color: '#90A4AE',
+    fontSize: 16,
     textAlign: 'center',
-    fontWeight: '600'
   },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    padding: 10,
-    marginTop: 10,
-    borderRadius: 5
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  cardTitle: {
+    fontWeight: '600',
+    fontSize: 18,
+    color: '#263238',
+    marginLeft: 10,
+    flex: 1,
+  },
+  cardBody: {
+    marginBottom: 12,
+  },
+  statusBadge: (estado) => ({
+    backgroundColor: estado === ESTADOS.PENDIENTE ? '#FFF3E0' :
+                    estado === ESTADOS.EN_PROGRESO ? '#E3F2FD' :
+                    estado === ESTADOS.FINALIZADO ? '#E8F5E9' :
+                    '#FFEBEE',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    marginBottom: 10,
+  }),
+  statusText: {
+    fontWeight: '600',
+    fontSize: 14,
+    color: '#263238',
+  },
+  description: {
+    color: '#546E7A',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 10,
+  },
+  dateContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 5,
+  },
+  dateText: {
+    color: '#757575',
+    fontSize: 12,
+    marginLeft: 5,
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#ECEFF1',
+    paddingTop: 12,
+  },
+  actionText: {
+    color: '#0D47A1',
+    fontSize: 14,
+    fontWeight: '500',
   },
   modalOverlay: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)'
+    backgroundColor: 'rgba(0,0,0,0.5)',
   },
   modalContent: {
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 10,
-    width: '85%'
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 24,
+    width: '90%',
+    maxHeight: '80%',
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    textAlign: 'center'
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#0D47A1',
+    marginBottom: 5,
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    fontSize: 16,
+    color: '#546E7A',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  estadosContainer: {
+    maxHeight: 200,
+    marginBottom: 20,
   },
   estadoBtn: {
-    backgroundColor: '#f0f0f0',
-    padding: 10,
-    borderRadius: 5,
-    marginVertical: 5
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#ECEFF1',
   },
-  estadoBtnSeleccionado: {
-    backgroundColor: '#cce5ff'
-  },
+  estadoBtnSeleccionado: (estado) => ({
+    backgroundColor: estado === ESTADOS.PENDIENTE ? '#FFF3E0' :
+                    estado === ESTADOS.EN_PROGRESO ? '#E3F2FD' :
+                    estado === ESTADOS.FINALIZADO ? '#E8F5E9' :
+                    '#FFEBEE',
+    borderColor: estado === ESTADOS.PENDIENTE ? '#FFA000' :
+                 estado === ESTADOS.EN_PROGRESO ? '#2196F3' :
+                 estado === ESTADOS.FINALIZADO ? '#4CAF50' :
+                 '#F44336',
+  }),
   estadoBtnTexto: {
-    textAlign: 'center',
-    fontWeight: 'bold'
-  }
+    fontWeight: '600',
+    fontSize: 16,
+    marginLeft: 10,
+    color: '#263238',
+    flex: 1,
+  },
+  inputLabel: {
+    color: '#546E7A',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#CFD8DC',
+    borderRadius: 8,
+    padding: 12,
+    minHeight: 100,
+    textAlignVertical: 'top',
+    marginBottom: 20,
+    fontSize: 14,
+    color: '#263238',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  cancelButton: {
+    flex: 1,
+    backgroundColor: '#ECEFF1',
+    borderRadius: 8,
+    padding: 14,
+    marginRight: 10,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#546E7A',
+    fontWeight: '600',
+  },
+  saveButton: {
+    flex: 1,
+    backgroundColor: '#0D47A1',
+    borderRadius: 8,
+    padding: 14,
+    alignItems: 'center',
+    opacity: 1,
+  },
+  saveButtonDisabled: {
+    opacity: 0.5,
+  },
+  saveButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  }, 
 });
 
-export default SubtareasMiembro;
+export default SubtareasMiembro; 
