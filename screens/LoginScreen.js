@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, Button, Alert, StyleSheet } from 'react-native';
 import { auth, db } from '../firebaseConfig';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 
 const LoginScreen = ({ navigation }) => {
   const [username, setUsername] = useState('');
@@ -16,24 +16,26 @@ const LoginScreen = ({ navigation }) => {
     }
 
     try {
-      // Paso 1: Buscar el username en la colección "usuarios"
-      const q = query(collection(db, 'usuarios'), where('username', '==', username));
-      const querySnapshot = await getDocs(q);
+      // Paso 1: Convertir username a correo interno
+      const email = username + '@empresa.com';
 
-      if (querySnapshot.empty) {
-        Alert.alert('Error', 'Usuario no encontrado.');
+      // Paso 2: Autenticación con correo y contraseña
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const userId = userCredential.user.uid;
+
+      // Paso 3: Consultar datos del usuario en Firestore
+      const userDocRef = doc(db, 'usuarios', userId);
+      const userDocSnap = await getDoc(userDocRef);
+
+      if (!userDocSnap.exists()) {
+        Alert.alert('Error', 'No se encontró la información del usuario.');
         return;
       }
 
-      const userData = querySnapshot.docs[0].data();
-      const userId = querySnapshot.docs[0].id;
-      const email = userData.username + '@empresa.com'; // Reglas internas
+      const userData = userDocSnap.data();
       const rol = userData.rol;
 
-      // Paso 2: Iniciar sesión con email asociado + contraseña
-      await signInWithEmailAndPassword(auth, email, password);
-
-      // Paso 3: Redirigir según rol
+      // Paso 4: Navegar según rol
       if (rol === 'gerente') {
         navigation.navigate('HomeGerente', { userId });
       } else if (rol === 'miembro') {
