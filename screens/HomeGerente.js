@@ -550,7 +550,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
   },
-  gradientButton: {
+  gradientButton: { 
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
