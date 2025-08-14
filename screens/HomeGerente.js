@@ -11,9 +11,9 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
-  Image,
-  Animated,
-  Easing
+  ActivityIndicator,
+  Animated, // Añadido para solucionar el error
+  Easing // Añadido para las animaciones
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -32,6 +32,9 @@ import {
 import { auth, db } from '../firebaseConfig';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { calcularAvanceTareas } from '../utils/calcularPorcentaje';
+import HistorialProyecto from './HistorialProyecto';
+import TareasProyecto from './TareasProyecto';
+
 
 const HomeGerente = ({ route, navigation }) => {
   const { userId } = route.params || {};
@@ -49,10 +52,20 @@ const HomeGerente = ({ route, navigation }) => {
   const [showMembersModal, setShowMembersModal] = useState(false);
   const [membersList, setMembersList] = useState([]);
   const [modalTitle, setModalTitle] = useState('');
+  const [searchText, setSearchText] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [proyectoAEditar, setProyectoAEditar] = useState(null);
+  const [editModalVisible, setEditModalVisible] = useState(false);
 
-  const fadeAnim = useState(new Animated.Value(0))[0];
-  const slideAnim = useState(new Animated.Value(50))[0];
+  // Animaciones corregidas
+  const fadeAnim = new Animated.Value(0);
+  const slideAnim = new Animated.Value(50);
 
+  const miembrosFiltrados = miembrosDisponibles.filter(miembro => 
+    miembro.nombre.toLowerCase().includes(searchText.toLowerCase()) ||
+    miembro.username.toLowerCase().includes(searchText.toLowerCase())
+  );
   useEffect(() => {
     Animated.parallel([
       Animated.timing(fadeAnim, {
@@ -73,6 +86,7 @@ const HomeGerente = ({ route, navigation }) => {
 
   const obtenerProyectos = async () => {
     try {
+      setLoading(true);
       const q = query(collection(db, 'proyectos'), where('creadorId', '==', userId));
       const snapshot = await getDocs(q);
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -80,59 +94,112 @@ const HomeGerente = ({ route, navigation }) => {
     } catch (error) {
       console.error('Error al cargar proyectos:', error);
       Alert.alert('Error', 'No se pudieron cargar los proyectos');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const crearProyecto = async () => {
-    if (!nombre || !descripcion || !fechaEntrega) {
-      Alert.alert('Error', 'Completa todos los campos');
-      return;
-    }
+const crearProyecto = async () => {
+  if (!nombre.trim() || !descripcion.trim() || !fechaEntrega || !userId) {
+    Alert.alert('Error', 'Todos los campos son obligatorios');
+    return;
+  }
 
-    try {
-      await addDoc(collection(db, 'proyectos'), {
-        nombre,
-        descripcion,
-        fechaEntrega: fechaEntrega.toISOString(),
-        creadorId: userId,
-        avance: 0,
-        miembros: []
+  try {
+    await addDoc(collection(db, 'proyectos'), {
+      nombre: nombre.trim(),
+      descripcion: descripcion.trim(),
+      fechaEntrega: fechaEntrega.toISOString(),
+      creadorId: userId, // Asegúrate que userId tenga valor
+      avance: 0,
+      miembros: [],
+      historialComentarios: []
       });
       setNombre('');
       setDescripcion('');
       setFechaEntrega(new Date());
       await obtenerProyectos();
-      await calcularAvanceTareas(userId);
-    } catch (error) {
-      console.error('Error al crear proyecto:', error);
-      Alert.alert('Error', 'No se pudo crear el proyecto');
-    }
+      } catch (error) {
+        console.error('Error al crear proyecto:', error);
+        Alert.alert('Error', error.message); // Muestra el mensaje de error completo
+      }
+  };
+
+  const handleProyectoPress = (proyecto) => {
+    navigation.navigate('TareasProyecto', { 
+      proyectoId: proyecto.id,
+      proyectoNombre: proyecto.nombre
+    });
   };
 
   const obtenerMiembros = async () => {
     try {
+      setLoading(true);
       const q = query(collection(db, 'usuarios'), where('rol', '==', 'miembro'));
       const snapshot = await getDocs(q);
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setMiembrosDisponibles(data);
+      setSearchText('');
     } catch (error) {
       console.error('Error al cargar miembros:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
   const asignarMiembro = async () => {
-    if (!proyectoSeleccionado || !miembroSeleccionado) return;
+    if (!proyectoSeleccionado || !miembroSeleccionado) {
+      Alert.alert('Error', 'Debes seleccionar un proyecto y un miembro');
+      return;
+    }
+
     try {
+      setLoading(true);
       const proyectoRef = doc(db, 'proyectos', proyectoSeleccionado.id);
       await updateDoc(proyectoRef, {
-        miembros: arrayUnion(miembroSeleccionado)
+        miembros: arrayUnion(miembroSeleccionado),
+        historialComentarios: arrayUnion({
+          tipo: 'asignacion',
+          miembroId: miembroSeleccionado,
+          fecha: new Date().toISOString(),
+          mensaje: `Miembro asignado al proyecto`
+        })
       });
       setModalAsignarVisible(false);
       setMiembroSeleccionado(null);
       await obtenerProyectos();
-      await calcularAvanceTareas(proyectoSeleccionado.id);
     } catch (error) {
       console.error('Error al asignar miembro:', error);
+      Alert.alert('Error', 'No se pudo asignar el miembro');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const eliminarProyecto = async () => {
+    if (!proyectoAEliminar) return;
+    
+    try {
+      setLoading(true);
+      const userDoc = await getDoc(doc(db, 'usuarios', userId));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        
+        if (password !== userData.password) {
+          Alert.alert('Error', 'Contraseña incorrecta');
+          return;
+        }
+
+        await deleteDoc(doc(db, 'proyectos', proyectoAEliminar));
+        setModalVisible(false);
+        setPassword('');
+        await obtenerProyectos();
+      }
+    } catch (error) {
+      console.error('Error al eliminar proyecto:', error);
+      Alert.alert('Error', 'No se pudo eliminar el proyecto');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -145,6 +212,7 @@ const HomeGerente = ({ route, navigation }) => {
     }
 
     try {
+      setLoading(true);
       const nombres = [];
 
       for (const id of miembros) {
@@ -158,44 +226,134 @@ const HomeGerente = ({ route, navigation }) => {
         }
       }
 
-      setModalTitle('🧑‍💻 Miembros Asignados');
+      setModalTitle('Miembros Asignados');
       setMembersList(nombres);
       setShowMembersModal(true);
     } catch (error) {
       console.error('Error al obtener miembros:', error);
-      setModalTitle('⚠️ Error');
+      setModalTitle('Error');
       setMembersList(['No se pudieron cargar los miembros asignados']);
       setShowMembersModal(true);
+    } finally {
+      setLoading(false);
     }
   };
 
-  return (
-    <LinearGradient colors={['#E0F7FA', '#B2EBF2', '#80DEEA']} style={styles.background}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.container}
-      >
-        <Animated.View style={[styles.header, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-          <Text style={styles.headerTitle}>Mis Proyectos</Text>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Icon name="arrow-back" size={24} color="#00796B" />
-          </TouchableOpacity>
-        </Animated.View>
+  const editarProyecto = async () => {
+    if (!proyectoAEditar || !nombre.trim() || !descripcion.trim()) {
+      Alert.alert('Error', 'Todos los campos son obligatorios');
+      return;
+    }
 
-        {/* Lista de Proyectos */}
-        <Animated.View style={[styles.cardContainer, { opacity: fadeAnim }]}>
-          <FlatList
-            data={proyectos}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
+    try {
+      setLoading(true);
+      const proyectoRef = doc(db, 'proyectos', proyectoAEditar.id);
+      await updateDoc(proyectoRef, {
+        nombre: nombre.trim(),
+        descripcion: descripcion.trim(),
+        fechaEntrega: fechaEntrega.toISOString()
+      });
+      
+      setEditModalVisible(false);
+      await obtenerProyectos();
+      Alert.alert('Éxito', 'Proyecto actualizado correctamente');
+    } catch (error) {
+      console.error('Error al editar proyecto:', error);
+      Alert.alert('Error', 'No se pudo actualizar el proyecto');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerHistorial = (proyecto) => {
+    navigation.navigate('HistorialProyecto', { proyectoId: proyecto.id });
+  };
+
+return (
+  <LinearGradient colors={['#E0F7FA', '#B2EBF2', '#80DEEA']} style={styles.background}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.container}
+    >
+      {/* HEADER */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Mis Proyectos</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Icon name="arrow-back" size={24} color="#00796B" />
+        </TouchableOpacity>
+      </View>
+
+      {/* FORMULARIO DE CREACIÓN (SIEMPRE VISIBLE) */}
+      <View style={styles.creationContainer}>
+        <Text style={styles.sectionTitle}>Crear Nuevo Proyecto</Text>
+        
+        <TextInput
+          style={styles.input}
+          placeholder="Nombre del proyecto *"
+          value={nombre}
+          onChangeText={setNombre}
+        />
+        
+        <TextInput
+          style={[styles.input, styles.multilineInput]}
+          placeholder="Descripción *"
+          multiline
+          value={descripcion}
+          onChangeText={setDescripcion}
+        />
+        
+        <TouchableOpacity
+          style={styles.dateButton}
+          onPress={() => setShowDatePicker(true)}
+        >
+          <Icon name="event" size={20} color="#7C4DFF" />
+          <Text style={styles.dateButtonText}>
+            {fechaEntrega.toLocaleDateString() || 'Seleccionar fecha'}
+          </Text>
+        </TouchableOpacity>
+        
+        {showDatePicker && (
+          <DateTimePicker
+            value={fechaEntrega}
+            mode="date"
+            display="default"
+            onChange={(event, selectedDate) => {
+              setShowDatePicker(false);
+              if (selectedDate) setFechaEntrega(selectedDate);
+            }}
+          />
+        )}
+        
+        <TouchableOpacity
+          style={styles.createButton}
+          onPress={crearProyecto}
+          disabled={!nombre.trim() || !descripcion.trim()}
+        >
+          <Text style={styles.createButtonText}>Crear Proyecto</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* LISTA DE PROYECTOS */}
+      {loading ? (
+        <ActivityIndicator size="large" color="#7C4DFF" style={styles.loader} />
+      ) : (
+        <FlatList
+          data={proyectos}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <View style={styles.projectCard}>
               <TouchableOpacity 
-                style={styles.projectCard}
-                onPress={() => navigation.navigate('TareasProyecto', { proyectoId: item.id, userId })}
+                onPress={() => navigation.navigate('TareasProyecto', {
+                  proyectoId: item.id,
+                  userId: userId,
+                })}
+                style={styles.cardContent}
               >
                 <View style={styles.projectHeader}>
                   <Text style={styles.projectName}>{item.nombre}</Text>
                   <Text style={styles.projectDueDate}>
-                    <Icon name="event" size={16} color="#7C4DFF" /> {new Date(item.fechaEntrega).toLocaleDateString()}
+                    <Icon name="event" size={16} color="#7C4DFF" /> 
+                    {new Date(item.fechaEntrega).toLocaleDateString()}
                   </Text>
                 </View>
                 
@@ -205,118 +363,89 @@ const HomeGerente = ({ route, navigation }) => {
                   <View style={[styles.progressBar, { width: `${item.avance ?? 0}%` }]} />
                   <Text style={styles.progressText}>{item.avance ?? 0}% completado</Text>
                 </View>
-                
-                <View style={styles.projectActions}>
-                  <TouchableOpacity 
-                    style={styles.actionButton}
-                    onPress={() => {
-                      setProyectoSeleccionado(item);
-                      obtenerMiembros();
-                      setModalAsignarVisible(true);
-                    }}
-                  >
-                    <Icon name="person-add" size={20} color="#7C4DFF" />
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity 
-                    style={styles.actionButton}
-                    onPress={() => {
-                      setProyectoSeleccionado(item);
-                      verMiembrosAsignados(item.miembros || []);
-                    }}
-                  >
-                    <Icon name="people" size={20} color="#7C4DFF" />
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity 
-                    style={styles.deleteButton}
-                    onPress={() => {
-                      setProyectoAEliminar(item.id);
-                      setModalVisible(true);
-                    }}
-                  >
-                    <Icon name="delete" size={20} color="#e53935" />
-                  </TouchableOpacity>
-                </View>
               </TouchableOpacity>
-            )}
-            ListEmptyComponent={
-              <View style={styles.emptyContainer}>
-                <Icon name="folder" size={50} color="#90A4AE" />
-                <Text style={styles.emptyText}>No tienes proyectos aún</Text>
+              
+              {/* BOTONES DE ACCIÓN (INCLUYENDO VER MIEMBROS) */}
+              <View style={styles.projectActions}>
+                <TouchableOpacity
+                  style={styles.historyButton}
+                  onPress={() => handleVerHistorial(item)}
+                >
+                  <Icon name="history" size={20} color="#FF9800" />
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={styles.editButton}
+                  onPress={() => {
+                    setProyectoAEditar(item);
+                    setNombre(item.nombre);
+                    setDescripcion(item.descripcion);
+                    setFechaEntrega(new Date(item.fechaEntrega));
+                    setEditModalVisible(true);
+                  }}
+                >
+                  <Icon name="edit" size={20} color="#4CAF50" />
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={styles.actionButton}
+                  onPress={() => {
+                    setProyectoSeleccionado(item);
+                    obtenerMiembros();
+                    setModalAsignarVisible(true);
+                  }}
+                >
+                  <Icon name="person-add" size={20} color="#7C4DFF" />
+                </TouchableOpacity>
+                
+                {/* BOTÓN PARA VER MIEMBROS ASIGNADOS */}
+                <TouchableOpacity 
+                  style={styles.membersButton}
+                  onPress={() => verMiembrosAsignados(item.miembros || [])}
+                >
+                  <Icon name="people" size={20} color="#7C4DFF" />
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={styles.deleteButton}
+                  onPress={() => {
+                    setProyectoAEliminar(item.id);
+                    setModalVisible(true);
+                  }}
+                >
+                  <Icon name="delete" size={20} color="#e53935" />
+                </TouchableOpacity>
               </View>
-            }
-          />
-        </Animated.View>
-
-        {/* Formulario Nuevo Proyecto */}
-        <Animated.View style={[styles.newProjectCard, { opacity: fadeAnim }]}>
-          <Text style={styles.sectionTitle}>Crear Nuevo Proyecto</Text>
-          
-          <TextInput 
-            style={styles.input} 
-            placeholder="Nombre del proyecto" 
-            placeholderTextColor="#90A4AE"
-            value={nombre} 
-            onChangeText={setNombre} 
-          />
-          
-          <TextInput 
-            style={[styles.input, styles.multilineInput]} 
-            placeholder="Descripción" 
-            placeholderTextColor="#90A4AE"
-            multiline
-            value={descripcion} 
-            onChangeText={setDescripcion} 
-          />
-          
-          <TouchableOpacity 
-            style={styles.dateButton}
-            onPress={() => setShowDatePicker(true)}
-          >
-            <Icon name="event" size={20} color="#7C4DFF" />
-            <Text style={styles.dateButtonText}>
-              {fechaEntrega.toLocaleDateString() || 'Seleccionar fecha de entrega'}
-            </Text>
-          </TouchableOpacity>
-          
-          {showDatePicker && (
-            <DateTimePicker
-              value={fechaEntrega}
-              mode="date"
-              display="default"
-              minimumDate={new Date(Date.now() + 86400000)}
-              onChange={(event, selectedDate) => {
-                setShowDatePicker(false);
-                if (selectedDate) setFechaEntrega(selectedDate);
-              }}
-            />
+            </View>
           )}
-          
-          <TouchableOpacity 
-            style={styles.createButton}
-            onPress={crearProyecto}
-          >
-            <LinearGradient
-              colors={['#7C4DFF', '#651FFF']}
-              style={styles.gradientButton}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-            >
-              <Text style={styles.createButtonText}>Crear Proyecto</Text>
-              <Icon name="add" size={20} color="#FFF" />
-            </LinearGradient>
-          </TouchableOpacity>
-        </Animated.View>
-
-        {/* Modal para asignar miembros (existente) */}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Icon name="folder" size={50} color="#90A4AE" />
+              <Text style={styles.emptyText}>No tienes proyectos aún</Text>
+            </View>
+          }
+          contentContainerStyle={styles.listContent}
+        />
+      )}
+        {/* Modal para asignar miembros */}
         <Modal visible={modalAsignarVisible} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Asignar Miembro</Text>
               
+              <View style={styles.searchContainer}>
+                <Icon name="search" size={20} color="#90A4AE" style={styles.searchIcon} />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Buscar miembros..."
+                  placeholderTextColor="#90A4AE"
+                  value={searchText}
+                  onChangeText={setSearchText}
+                />
+              </View>
+              
               <ScrollView style={styles.modalScroll}>
-                {miembrosDisponibles.map((miembro) => (
+                {miembrosFiltrados.map((miembro) => (
                   <TouchableOpacity
                     key={miembro.id}
                     onPress={() => setMiembroSeleccionado(miembro.id)}
@@ -339,7 +468,11 @@ const HomeGerente = ({ route, navigation }) => {
               <View style={styles.modalActions}>
                 <TouchableOpacity 
                   style={styles.cancelButton}
-                  onPress={() => setModalAsignarVisible(false)}
+                  onPress={() => {
+                    setModalAsignarVisible(false);
+                    setSearchText('');
+                    setMiembroSeleccionado(null);
+                  }}
                 >
                   <Text style={styles.cancelButtonText}>Cancelar</Text>
                 </TouchableOpacity>
@@ -347,6 +480,7 @@ const HomeGerente = ({ route, navigation }) => {
                 <TouchableOpacity 
                   style={styles.confirmButton}
                   onPress={asignarMiembro}
+                  disabled={!miembroSeleccionado || loading}
                 >
                   <LinearGradient
                     colors={['#7C4DFF', '#651FFF']}
@@ -354,7 +488,9 @@ const HomeGerente = ({ route, navigation }) => {
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 0 }}
                   >
-                    <Text style={styles.confirmButtonText}>Asignar</Text>
+                    <Text style={styles.confirmButtonText}>
+                      {loading ? 'Asignando...' : 'Asignar'}
+                    </Text>
                   </LinearGradient>
                 </TouchableOpacity>
               </View>
@@ -362,7 +498,7 @@ const HomeGerente = ({ route, navigation }) => {
           </View>
         </Modal>
 
-        {/* Modal personalizado para mostrar miembros asignados (nuevo) */}
+        {/* Modal para mostrar miembros asignados */}
         <Modal 
           visible={showMembersModal} 
           transparent 
@@ -394,9 +530,124 @@ const HomeGerente = ({ route, navigation }) => {
           </View>
         </Modal>
 
-        {/* Modal de Confirmación (similar al de asignar pero para eliminar) */}
-        {/* ... */}
+        {/* Modal para eliminar proyecto */}
+        <Modal visible={modalVisible} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Confirmar Eliminación</Text>
+              <Text style={styles.deleteMessage}>¿Estás seguro que deseas eliminar este proyecto?</Text>
+              
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Ingresa tu contraseña para confirmar"
+                placeholderTextColor="#90A4AE"
+                secureTextEntry
+                value={password}
+                onChangeText={setPassword}
+              />
+              
+              <View style={styles.modalActions}>
+                <TouchableOpacity 
+                  style={styles.cancelButton}
+                  onPress={() => {
+                    setModalVisible(false);
+                    setPassword('');
+                  }}
+                >
+                  <Text style={styles.cancelButtonText}>Cancelar</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={styles.confirmButton}
+                  onPress={eliminarProyecto}
+                  disabled={loading}
+                >
+                  <LinearGradient
+                    colors={['#FF5252', '#FF1744']}
+                    style={styles.gradientButton}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                  >
+                    <Text style={styles.confirmButtonText}>
+                      {loading ? 'Eliminando...' : 'Eliminar'}
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
+        {/* Modal para editar proyecto */}
+        <Modal visible={editModalVisible} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Editar Proyecto</Text>
+              
+              <TextInput 
+                style={styles.input} 
+                placeholder="Nombre del proyecto *" 
+                value={nombre} 
+                onChangeText={setNombre} 
+              />
+              
+              <TextInput 
+                style={[styles.input, styles.multilineInput]} 
+                placeholder="Descripción *" 
+                multiline
+                value={descripcion} 
+                onChangeText={setDescripcion} 
+              />
+              
+              <TouchableOpacity 
+                style={styles.dateButton}
+                onPress={() => setShowDatePicker(true)}
+              >
+                <Icon name="event" size={20} color="#7C4DFF" />
+                <Text style={styles.dateButtonText}>
+                  {fechaEntrega.toLocaleDateString()}
+                </Text>
+              </TouchableOpacity>
+              
+              {showDatePicker && (
+                <DateTimePicker
+                  value={fechaEntrega}
+                  mode="date"
+                  display="default"
+                  minimumDate={new Date(Date.now() + 86400000)}
+                  onChange={(event, selectedDate) => {
+                    setShowDatePicker(false);
+                    if (selectedDate) setFechaEntrega(selectedDate);
+                  }}
+                />
+              )}
+              
+              <View style={styles.modalActions}>
+                <TouchableOpacity 
+                  style={styles.cancelButton}
+                  onPress={() => setEditModalVisible(false)}
+                >
+                  <Text style={styles.cancelButtonText}>Cancelar</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={styles.confirmButton}
+                  onPress={editarProyecto}
+                  disabled={loading}
+                >
+                  <LinearGradient
+                    colors={['#4CAF50', '#2E7D32']}
+                    style={styles.gradientButton}
+                  >
+                    <Text style={styles.confirmButtonText}>
+                      {loading ? 'Guardando...' : 'Guardar Cambios'}
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </KeyboardAvoidingView>
     </LinearGradient>
   );
@@ -408,70 +659,107 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    paddingHorizontal: 20,
+    paddingHorizontal: 15,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 25,
+    paddingVertical: 15,
   },
   headerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
+    fontSize: 24,
+    fontWeight: 'bold',
     color: '#00796B',
   },
   backButton: {
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    borderRadius: 20,
-    padding: 10,
+    padding: 5,
   },
-  cardContainer: {
-    flex: 1,
-    marginBottom: 20,
+  creationContainer: {
+    backgroundColor: 'white',
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 15,
+    elevation: 3,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#00796B',
+    marginBottom: 10,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#BDBDBD',
+    borderRadius: 5,
+    padding: 12,
+    marginBottom: 10,
+    backgroundColor: 'white',
+  },
+  multilineInput: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  dateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#BDBDBD',
+    borderRadius: 5,
+    marginBottom: 10,
+    backgroundColor: 'white',
+  },
+  dateButtonText: {
+    marginLeft: 10,
+  },
+  createButton: {
+    backgroundColor: '#7C4DFF',
+    borderRadius: 5,
+    padding: 12,
+    alignItems: 'center',
+  },
+  createButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
   },
   projectCard: {
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    borderRadius: 16,
-    padding: 20,
+    backgroundColor: 'white',
+    borderRadius: 10,
     marginBottom: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 5,
+    elevation: 3,
+    overflow: 'hidden',
+  },
+  cardContent: {
+    padding: 15,
   },
   projectHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 5,
   },
   projectName: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: 'bold',
     color: '#263238',
-    flex: 1,
   },
   projectDueDate: {
-    fontSize: 14,
     color: '#7C4DFF',
   },
   projectDescription: {
-    fontSize: 14,
-    color: '#546E7A',
-    marginBottom: 15,
+    color: '#616161',
+    marginBottom: 10,
   },
   progressContainer: {
     height: 10,
     backgroundColor: '#ECEFF1',
     borderRadius: 5,
-    marginBottom: 15,
+    marginBottom: 5,
     overflow: 'hidden',
   },
   progressBar: {
     height: '100%',
     backgroundColor: '#7C4DFF',
-    borderRadius: 5,
   },
   progressText: {
     fontSize: 12,
@@ -481,18 +769,30 @@ const styles = StyleSheet.create({
   projectActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
+    padding: 10,
+    backgroundColor: '#F5F5F5',
+    borderTopWidth: 1,
+    borderTopColor: '#EEEEEE',
   },
   actionButton: {
-    backgroundColor: 'rgba(124, 77, 255, 0.1)',
-    borderRadius: 20,
-    padding: 8,
     marginLeft: 10,
+    padding: 5,
+  },
+  membersButton: {
+    marginLeft: 10,
+    padding: 5,
+  },
+  editButton: {
+    marginLeft: 10,
+    padding: 5,
   },
   deleteButton: {
-    backgroundColor: 'rgba(229, 57, 53, 0.1)',
-    borderRadius: 20,
-    padding: 8,
     marginLeft: 10,
+    padding: 5,
+  },
+  historyButton: {
+    marginLeft: 10,
+    padding: 5,
   },
   emptyContainer: {
     alignItems: 'center',
@@ -500,67 +800,11 @@ const styles = StyleSheet.create({
     padding: 40,
   },
   emptyText: {
-    fontSize: 16,
-    color: '#90A4AE',
     marginTop: 10,
+    color: '#90A4AE',
   },
-  newProjectCard: {
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 5,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#00796B',
-    marginBottom: 15,
-  },
-  input: {
-    backgroundColor: 'rgba(236, 239, 241, 0.7)',
-    borderRadius: 10,
-    padding: 15,
-    marginBottom: 15,
-    fontSize: 16,
-    color: '#263238',
-  },
-  multilineInput: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  dateButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(236, 239, 241, 0.7)',
-    borderRadius: 10,
-    padding: 15,
-    marginBottom: 15,
-  },
-  dateButtonText: {
-    fontSize: 16,
-    color: '#263238',
-    marginLeft: 10,
-  },
-  createButton: {
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  gradientButton: { 
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 15,
-  },
-  createButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginRight: 10,
+  listContent: {
+    paddingBottom: 20,
   },
   modalOverlay: {
     flex: 1,
@@ -645,7 +889,6 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontWeight: '600',
   },
-  // Nuevos estilos para el modal personalizado
   customAlertContainer: {
     backgroundColor: 'white',
     borderRadius: 20,
@@ -693,6 +936,39 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 16,
   },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(236, 239, 241, 0.7)',
+    borderRadius: 10,
+    paddingHorizontal: 15,
+    marginBottom: 15,
+  },
+  searchIcon: {
+    marginRight: 10,
+  },
+  searchInput: {
+    flex: 1,
+    height: 40,
+    color: '#263238',
+  },
+  passwordInput: {
+    backgroundColor: 'rgba(236, 239, 241, 0.7)',
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 15,
+    fontSize: 16,
+    color: '#263238',
+  },
+  deleteMessage: {
+    fontSize: 16,
+    color: '#546E7A',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  loader: {
+    marginVertical: 40,
+  },
 });
 
-export default HomeGerente; 
+export default HomeGerente;

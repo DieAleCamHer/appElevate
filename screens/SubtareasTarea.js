@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, FlatList, StyleSheet, Alert, Modal,
-  TouchableOpacity, ImageBackground, StatusBar, ActivityIndicator
+  TouchableOpacity, StatusBar, ActivityIndicator, ScrollView
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { collection, addDoc, query, where, getDocs, deleteDoc, doc, Timestamp, updateDoc, getDoc } from 'firebase/firestore';
@@ -9,10 +9,10 @@ import { db, auth } from '../firebaseConfig';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { calcularAvanceSubtareas, calcularAvanceTareas } from '../utils/calcularPorcentaje';
 import { LinearGradient } from 'expo-linear-gradient';
-import { MaterialIcons, Feather } from '@expo/vector-icons';
+import { MaterialIcons, Feather, AntDesign } from '@expo/vector-icons';
 
 const SubtareasTarea = ({ route }) => {
-  const { tareaId, userId, userEmail, proyectoId } = route.params;
+  const { tareaId, userId, userEmail, proyectoId, userRole } = route.params;
   const [subtareas, setSubtareas] = useState([]);
   const [nombre, setNombre] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
@@ -22,11 +22,20 @@ const SubtareasTarea = ({ route }) => {
   const [fechaEntrega, setFechaEntrega] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState(null);
 
   useEffect(() => {
+    obtenerUsuarioActual();
     obtenerSubtareas();
     obtenerFechaEntregaTarea();
   }, []);
+
+  const obtenerUsuarioActual = () => {
+    const user = auth.currentUser;
+    if (user) {
+      setCurrentUser(user);
+    }
+  };
 
   const obtenerSubtareas = async () => {
     try {
@@ -82,6 +91,23 @@ const SubtareasTarea = ({ route }) => {
     }
   };
 
+  const registrarEnHistorial = async (accion, subtareaId, datosAdicionales = {}) => {
+    try {
+      await addDoc(collection(db, 'historial'), {
+        accion,
+        entidadId: subtareaId,
+        proyectoId,
+        tareaId,
+        usuario: currentUser?.email || 'usuario@desconocido.com',
+        usuarioUsername: currentUser?.email?.split('@')[0] || 'usuario',
+        fechaCambio: Timestamp.now(),
+        ...datosAdicionales
+      });
+    } catch (error) {
+      console.error('Error al registrar en historial:', error);
+    }
+  };
+
   const crearSubtarea = async () => {
     if (!nombre) {
       Alert.alert('Error', 'El nombre es obligatorio.');
@@ -94,13 +120,20 @@ const SubtareasTarea = ({ route }) => {
 
     try {
       setLoading(true);
-      await addDoc(collection(db, 'subtareas'), {
+      const subtareaRef = await addDoc(collection(db, 'subtareas'), {
         nombre,
         tareaId,
         completado: false,
         fechaEntrega: fechaEntrega,
-        fechaCreacion: Timestamp.now()
+        fechaCreacion: Timestamp.now(),
+        creadoPor: currentUser?.email || 'usuario@desconocido.com'
       });
+      
+      await registrarEnHistorial('CREAR_SUBTAREA', subtareaRef.id, {
+        nombreSubtarea: nombre,
+        estadoNuevo: 'Pendiente'
+      });
+      
       setNombre('');
       await obtenerSubtareas();
       await actualizarAvance();
@@ -112,11 +145,35 @@ const SubtareasTarea = ({ route }) => {
     }
   };
 
-  const confirmarEliminacion = async () => {
-    const email = userEmail;
+  const toggleCompletado = async (subtareaId, completadoActual, nombreSubtarea) => {
+    try {
+      setLoading(true);
+      const subtareaRef = doc(db, 'subtareas', subtareaId);
+      const nuevoEstado = !completadoActual;
+      await updateDoc(subtareaRef, { completado: nuevoEstado });
+      
+      await registrarEnHistorial(
+        nuevoEstado ? 'COMPLETAR_SUBTAREA' : 'REABRIR_SUBTAREA',
+        subtareaId,
+        {
+          nombreSubtarea,
+          estadoNuevo: nuevoEstado ? 'Completada' : 'Pendiente'
+        }
+      );
+      
+      await obtenerSubtareas();
+      await actualizarAvance();
+    } catch (error) {
+      Alert.alert('Error', 'No se pudo actualizar el estado de la subtarea');
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    if (!email) {
-      Alert.alert("Error", "No se pudo obtener el correo del usuario autenticado.");
+  const confirmarEliminacion = async () => {
+    if (userRole !== 'gerente') {
+      Alert.alert("Error", "Solo los gerentes pueden eliminar subtareas.");
       return;
     }
 
@@ -127,8 +184,20 @@ const SubtareasTarea = ({ route }) => {
 
     try {
       setLoading(true);
-      await signInWithEmailAndPassword(auth, email, confirmPassword);
-      await deleteDoc(doc(db, 'subtareas', subtareaAEliminar));
+      await signInWithEmailAndPassword(auth, userEmail, confirmPassword);
+      
+      // Obtener datos de la subtarea antes de eliminarla para el historial
+      const subtareaRef = doc(db, 'subtareas', subtareaAEliminar);
+      const subtareaSnap = await getDoc(subtareaRef);
+      const subtareaData = subtareaSnap.data();
+      
+      await deleteDoc(subtareaRef);
+      
+      await registrarEnHistorial('ELIMINAR_SUBTAREA', subtareaAEliminar, {
+        nombreSubtarea: subtareaData?.nombre || 'Subtarea sin nombre',
+        estadoAnterior: subtareaData?.completado ? 'Completada' : 'Pendiente'
+      });
+      
       Alert.alert('Éxito', 'Subtarea eliminada correctamente');
       setModalVisible(false);
       setConfirmPassword('');
@@ -151,46 +220,49 @@ const SubtareasTarea = ({ route }) => {
       hour: '2-digit',
       minute: '2-digit'
     });
-  }; 
-  
+  };
+
   return (
-    <ImageBackground 
-      source={require('../assets/logo.png')} 
-      style={styles.background}
-      resizeMode="cover"
-    >
-      <StatusBar barStyle="light-content" backgroundColor="#0D47A1" />
-      <View style={styles.container}>
-        <LinearGradient
-          colors={['#0D47A1', '#1976D2']}
-          style={styles.header}
-        >
-          <Text style={styles.title}>Gestión de Subtareas</Text>
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#3a7bd5" />
+      <LinearGradient
+        colors={['#3a7bd5', '#00d2ff']}
+        style={styles.header}
+      >
+        <View style={styles.headerContent}>
+          <Text style={styles.title}>Subtareas</Text>
           <Text style={styles.subtitle}>
             {subtareas.length} {subtareas.length === 1 ? 'subtarea' : 'subtareas'} registradas
           </Text>
-        </LinearGradient>
+        </View>
+      </LinearGradient>
 
+      <ScrollView style={styles.scrollContainer}>
         <View style={styles.formContainer}>
-          <Text style={styles.sectionTitle}>Crear Nueva Subtarea</Text>
+          <Text style={styles.sectionTitle}>Nueva Subtarea</Text>
           
-          <TextInput
-            placeholder="Nombre de la subtarea"
-            placeholderTextColor="#90A4AE"
-            value={nombre}
-            onChangeText={setNombre}
-            style={styles.input}
-          />
+          <View style={styles.inputContainer}>
+            <MaterialIcons name="title" size={20} color="#3a7bd5" style={styles.inputIcon} />
+            <TextInput
+              placeholder="Nombre de la subtarea"
+              placeholderTextColor="#90A4AE"
+              value={nombre}
+              onChangeText={setNombre}
+              style={styles.input}
+            />
+          </View>
           
-          <TouchableOpacity 
-            style={styles.dateButton}
-            onPress={() => setShowDatePicker(true)}
-          >
-            <MaterialIcons name="date-range" size={20} color="#0D47A1" />
-            <Text style={styles.dateButtonText}>
-              {fechaEntrega ? formatFecha(fechaEntrega) : 'Seleccionar fecha de entrega'}
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.inputContainer}>
+            <MaterialIcons name="date-range" size={20} color="#3a7bd5" style={styles.inputIcon} />
+            <TouchableOpacity 
+              style={styles.dateInput}
+              onPress={() => setShowDatePicker(true)}
+            >
+              <Text style={styles.dateText}>
+                {fechaEntrega ? formatFecha(fechaEntrega) : 'Seleccionar fecha de entrega'}
+              </Text>
+            </TouchableOpacity>
+          </View>
           
           {showDatePicker && (
             <DateTimePicker
@@ -206,85 +278,109 @@ const SubtareasTarea = ({ route }) => {
           )}
           
           <TouchableOpacity 
-            style={styles.createButton}
+            style={[styles.button, styles.primaryButton]}
             onPress={crearSubtarea}
             disabled={loading}
           >
-            <Text style={styles.createButtonText}>
-              {loading ? 'Creando...' : 'Crear Subtarea'}
-            </Text>
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <AntDesign name="pluscircleo" size={18} color="#fff" />
+                <Text style={styles.buttonText}>Crear Subtarea</Text>
+              </>
+            )}
           </TouchableOpacity>
         </View>
 
-        {loading ? (
+        {loading && subtareas.length === 0 ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#0D47A1" />
+            <ActivityIndicator size="large" color="#3a7bd5" />
             <Text style={styles.loadingText}>Cargando subtareas...</Text>
           </View>
         ) : subtareas.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <MaterialIcons name="playlist-add" size={50} color="#90A4AE" />
+            <Feather name="list" size={50} color="#cfd8dc" />
             <Text style={styles.emptyText}>No hay subtareas registradas</Text>
             <Text style={styles.emptySubtext}>Crea tu primera subtarea</Text>
           </View>
         ) : (
-          <FlatList
-            data={subtareas}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.listContent}
-            renderItem={({ item }) => (
-              <View style={styles.card}>
+          <View style={styles.listContainer}>
+            <Text style={styles.listTitle}>Subtareas registradas</Text>
+            {subtareas.map((item) => (
+              <View key={item.id} style={styles.card}>
                 <View style={styles.cardHeader}>
-                  <MaterialIcons 
-                    name={item?.completado ? "check-box" : "check-box-outline-blank"} 
-                    size={24} 
-                    color={item?.completado ? "#4CAF50" : "#757575"} 
-                  />
-                  <Text style={styles.cardTitle}>{item.nombre}</Text>
+                  <TouchableOpacity 
+                    onPress={() => toggleCompletado(item.id, item.completado, item.nombre)}
+                    disabled={userRole !== 'miembro'}
+                  >
+                    <MaterialIcons 
+                      name={item.completado ? "check-box" : "check-box-outline-blank"} 
+                      size={24} 
+                      color={item.completado ? "#4CAF50" : "#757575"} 
+                    />
+                  </TouchableOpacity>
+                  <Text style={[styles.cardTitle, item.completado && styles.completedText]}>{item.nombre}</Text>
                 </View>
                 
                 <View style={styles.cardBody}>
-                  <View style={styles.statusBadge(item?.completado)}>
-                    <Text style={[styles.statusText, { color: item?.completado ? '#4CAF50' : '#FFA000' }]}>
-                      {item?.completado ? 'Completada' : 'Pendiente'}
-                    </Text>
-                  </View>
-                  
-                  {item.fechaEntrega && (
-                    <View style={styles.dateContainer}>
-                      <Feather name="calendar" size={16} color="#757575" />
-                      <Text style={styles.dateText}>
-                        Entrega: {formatFecha(item.fechaEntrega)}
+                  <View style={styles.infoRow}>
+                    <View style={[styles.statusBadge, item.completado ? styles.completedBadge : styles.pendingBadge]}>
+                      <Text style={[styles.statusText, item.completado ? styles.completedStatus : styles.pendingStatus]}>
+                        {item.completado ? 'Completada' : 'Pendiente'}
                       </Text>
                     </View>
-                  )}
+                    
+                    {item.fechaEntrega && (
+                      <View style={styles.dateInfo}>
+                        <Feather name="calendar" size={16} color="#757575" />
+                        <Text style={styles.dateText}>
+                          {formatFecha(item.fechaEntrega)}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  
+                  <View style={styles.creatorInfo}>
+                    <Feather name="user" size={14} color="#90A4AE" />
+                    <Text style={styles.creatorText}>{item.creadoPor || 'Usuario desconocido'}</Text>
+                  </View>
                 </View>
                 
-                <TouchableOpacity 
-                  style={styles.deleteButton}
-                  onPress={() => {
-                    setSubtareaAEliminar(item.id);
-                    setModalVisible(true);
-                  }}
-                >
-                  <MaterialIcons name="delete" size={20} color="#F44336" />
-                  <Text style={styles.deleteButtonText}>Eliminar</Text>
-                </TouchableOpacity>
+                {userRole === 'gerente' && (
+                  <View style={styles.cardFooter}>
+                    <TouchableOpacity 
+                      style={styles.deleteButton}
+                      onPress={() => {
+                        setSubtareaAEliminar(item.id);
+                        setModalVisible(true);
+                      }}
+                    >
+                      <MaterialIcons name="delete-outline" size={20} color="#F44336" />
+                      <Text style={styles.deleteButtonText}>Eliminar</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
-            )}
-          />
+            ))}
+          </View>
         )}
+      </ScrollView>
 
-        {/* Modal de eliminación */}
-        <Modal visible={modalVisible} transparent animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <MaterialIcons name="warning" size={40} color="#FFA000" style={styles.modalIcon} />
-              <Text style={styles.modalTitle}>Confirmar Eliminación</Text>
-              <Text style={styles.modalText}>
-                ¿Estás seguro que deseas eliminar esta subtarea? Esta acción no se puede deshacer.
-              </Text>
-              <Text style={styles.inputLabel}>Confirma tu contraseña</Text>
+      {/* Modal de eliminación */}
+      <Modal visible={modalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalIconContainer}>
+              <MaterialIcons name="warning" size={40} color="#FFA000" />
+            </View>
+            <Text style={styles.modalTitle}>Confirmar Eliminación</Text>
+            <Text style={styles.modalText}>
+              ¿Estás seguro que deseas eliminar esta subtarea? Esta acción no se puede deshacer.
+            </Text>
+            
+            <View style={styles.inputContainer}>
+              <MaterialIcons name="lock-outline" size={20} color="#3a7bd5" style={styles.inputIcon} />
               <TextInput
                 placeholder="Ingresa tu contraseña"
                 placeholderTextColor="#90A4AE"
@@ -293,67 +389,75 @@ const SubtareasTarea = ({ route }) => {
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
               />
-              <View style={styles.modalButtons}>
-                <TouchableOpacity 
-                  style={styles.cancelButton}
-                  onPress={() => {
-                    setModalVisible(false);
-                    setConfirmPassword('');
-                  }}
-                >
-                  <Text style={styles.cancelButtonText}>Cancelar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.confirmButton}
-                  onPress={confirmarEliminacion}
-                  disabled={!confirmPassword || loading}
-                >
-                  <Text style={styles.confirmButtonText}>
-                    {loading ? 'Eliminando...' : 'Confirmar'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
+            </View>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={[styles.button, styles.secondaryButton]}
+                onPress={() => {
+                  setModalVisible(false);
+                  setConfirmPassword('');
+                }}
+              >
+                <Text style={[styles.buttonText, styles.secondaryButtonText]}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.button, styles.dangerButton]}
+                onPress={confirmarEliminacion}
+                disabled={!confirmPassword || loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.buttonText}>Confirmar</Text>
+                )}
+              </TouchableOpacity>
             </View>
           </View>
-        </Modal>
-      </View>
-    </ImageBackground>
+        </View>
+      </Modal>
+    </View>
   );
 };
 
+// Estilos (igual que en la versión anterior)
 const styles = StyleSheet.create({
-  background: {
-    flex: 1,
-  },
   container: {
+    flex: 1,
+    backgroundColor: '#f5f7fa',
+  },
+  scrollContainer: {
     flex: 1,
   },
   header: {
-    padding: 24,
     paddingTop: 50,
     paddingBottom: 20,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
+    paddingHorizontal: 20,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
     elevation: 8,
   },
+  headerContent: {
+    alignItems: 'center',
+  },
   title: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: '700',
     color: '#FFFFFF',
-    marginBottom: 8,
+    marginBottom: 5,
   },
   subtitle: {
     fontSize: 16,
-    color: '#E3F2FD',
-    opacity: 0.9,
+    color: 'rgba(255,255,255,0.9)',
+    fontWeight: '500',
   },
   formContainer: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    borderRadius: 12,
     padding: 20,
     margin: 16,
     shadowColor: '#000',
@@ -365,58 +469,87 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#0D47A1',
+    color: '#3a7bd5',
     marginBottom: 16,
+    textAlign: 'center',
   },
-  input: {
-    borderWidth: 1,
-    borderColor: '#CFD8DC',
-    borderRadius: 8,
-    padding: 14,
-    marginBottom: 16,
-    fontSize: 16,
-    color: '#263238',
-  },
-  dateButton: {
+  inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#CFD8DC',
-    borderRadius: 8,
-    padding: 14,
+    borderColor: '#e0e0e0',
+    borderRadius: 10,
     marginBottom: 16,
+    overflow: 'hidden',
   },
-  dateButtonText: {
-    marginLeft: 10,
+  inputIcon: {
+    padding: 12,
+    backgroundColor: '#f5f7fa',
+  },
+  input: {
+    flex: 1,
+    padding: 12,
     fontSize: 16,
     color: '#263238',
   },
-  createButton: {
-    backgroundColor: '#0D47A1',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
+  dateInput: {
+    flex: 1,
+    padding: 12,
   },
-  createButtonText: {
-    color: '#FFFFFF',
+  dateText: {
+    fontSize: 16,
+    color: '#263238',
+  },
+  button: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    padding: 14,
+    marginTop: 8,
+  },
+  buttonText: {
     fontSize: 16,
     fontWeight: '600',
+    marginLeft: 8,
+  },
+  primaryButton: {
+    backgroundColor: '#3a7bd5',
+  },
+  secondaryButton: {
+    backgroundColor: '#f5f7fa',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  dangerButton: {
+    backgroundColor: '#F44336',
+  },
+  secondaryButtonText: {
+    color: '#546E7A',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 40,
   },
   loadingText: {
     marginTop: 16,
-    color: '#0D47A1',
+    color: '#3a7bd5',
     fontSize: 16,
   },
   emptyContainer: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 40,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    margin: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 3,
   },
   emptyText: {
     marginTop: 16,
@@ -429,16 +562,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 8,
   },
-  listContent: {
-    padding: 16,
-    paddingBottom: 32,
+  listContainer: {
+    paddingHorizontal: 16,
+    marginBottom: 20,
+  },
+  listTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#3a7bd5',
+    marginBottom: 12,
+    marginLeft: 8,
   },
   card: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
-    marginHorizontal: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -452,45 +591,69 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     fontWeight: '600',
-    fontSize: 18,
+    fontSize: 16,
     color: '#263238',
     marginLeft: 10,
     flex: 1,
   },
+  completedText: {
+    textDecorationLine: 'line-through',
+    color: '#90A4AE',
+  },
   cardBody: {
     marginBottom: 12,
   },
-  statusBadge: (completado) => ({
-    backgroundColor: completado ? '#E8F5E9' : '#FFF3E0',
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  statusBadge: {
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 12,
-    alignSelf: 'flex-start',
-    marginBottom: 10,
-  }),
+  },
+  completedBadge: {
+    backgroundColor: '#E8F5E9',
+  },
+  pendingBadge: {
+    backgroundColor: '#FFF3E0',
+  },
   statusText: {
     fontWeight: '600',
-    fontSize: 14,
-    // 🔴 Eliminado: color dinámico no se debe colocar aquí
+    fontSize: 12,
   },
-  dateContainer: {
+  completedStatus: {
+    color: '#4CAF50',
+  },
+  pendingStatus: {
+    color: '#FFA000',
+  },
+  dateInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 5,
   },
-  dateText: {
-    color: '#757575',
+  creatorInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  creatorText: {
+    color: '#90A4AE',
     fontSize: 12,
     marginLeft: 5,
+  },
+  cardFooter: {
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    paddingTop: 12,
+    marginTop: 8,
   },
   deleteButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#ECEFF1',
-    marginTop: 10,
   },
   deleteButtonText: {
     color: '#F44336',
@@ -511,13 +674,13 @@ const styles = StyleSheet.create({
     width: '90%',
     alignItems: 'center',
   },
-  modalIcon: {
+  modalIconContainer: {
     marginBottom: 16,
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#0D47A1',
+    color: '#3a7bd5',
     marginBottom: 8,
     textAlign: 'center',
   },
@@ -526,21 +689,11 @@ const styles = StyleSheet.create({
     color: '#546E7A',
     textAlign: 'center',
     marginBottom: 20,
-  },
-  inputLabel: {
-    color: '#546E7A',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 8,
-    alignSelf: 'flex-start',
+    lineHeight: 24,
   },
   modalInput: {
-    borderWidth: 1,
-    borderColor: '#CFD8DC',
-    borderRadius: 8,
-    padding: 14,
-    width: '100%',
-    marginBottom: 20,
+    flex: 1,
+    padding: 12,
     fontSize: 16,
     color: '#263238',
   },
@@ -548,29 +701,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     width: '100%',
-  },
-  cancelButton: {
-    backgroundColor: '#ECEFF1',
-    borderRadius: 8,
-    padding: 14,
-    flex: 1,
-    marginRight: 10,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    color: '#546E7A',
-    fontWeight: '600',
-  },
-  confirmButton: {
-    backgroundColor: '#F44336',
-    borderRadius: 8,
-    padding: 14,
-    flex: 1,
-    alignItems: 'center',
-  },
-  confirmButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
+    marginTop: 16,
   },
 });
 
