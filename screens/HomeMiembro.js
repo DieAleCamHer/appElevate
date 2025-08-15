@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ImageBackground, StatusBar, ActivityIndicator } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, StatusBar, ActivityIndicator } from 'react-native';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -36,23 +36,37 @@ const HomeMiembro = ({ route, navigation }) => {
       })}
     >
       <LinearGradient
-        colors={['#E3F2FD', '#BBDEFB']}
+        colors={['#FFFFFF', '#F5F9FF']}
         style={styles.cardGradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
       >
         <View style={styles.cardHeader}>
-          <MaterialIcons name="work" size={24} color="#0D47A1" />
-          <Text style={styles.nombre}>{item.nombre}</Text>
+          <View style={styles.iconContainer}>
+            <MaterialIcons name="work" size={20} color="#3A7BD5" />
+          </View>
+          <Text style={styles.nombre} numberOfLines={1} ellipsizeMode="tail">{item.nombre}</Text>
         </View>
         
-        <Text style={styles.descripcion}>{item.descripcion}</Text>
+        <Text style={styles.descripcion} numberOfLines={2} ellipsizeMode="tail">
+          {item.descripcion || 'Sin descripción'}
+        </Text>
         
         <View style={styles.cardFooter}>
-          <Text style={styles.estado}>{item.estado || 'En progreso'}</Text>
+          <View style={[styles.estadoContainer, { 
+            backgroundColor: item.estado === 'Completado' ? '#E8F5E9' : 
+                           item.estado === 'En pausa' ? '#FFF8E1' : '#E3F2FD'
+          }]}>
+            <Text style={[styles.estado, {
+              color: item.estado === 'Completado' ? '#2E7D32' : 
+                     item.estado === 'En pausa' ? '#F57F17' : '#1565C0'
+            }]}>
+              {item.estado || 'En progreso'}
+            </Text>
+          </View>
           <View style={styles.verTareasButton}>
-            <Text style={styles.verTareasText}>Ver Tareas</Text>
-            <MaterialIcons name="arrow-forward" size={18} color="#0D47A1" />
+            <Text style={styles.verTareasText}>Ver tareas</Text>
+            <MaterialIcons name="chevron-right" size={20} color="#3A7BD5" />
           </View>
         </View>
       </LinearGradient>
@@ -60,105 +74,114 @@ const HomeMiembro = ({ route, navigation }) => {
   );
 
   return (
-    <ImageBackground 
-      source={require('../assets/logo.png')} 
-      style={styles.background}
-      resizeMode="cover"
-    >
-      <StatusBar barStyle="light-content" backgroundColor="#0D47A1" />
-      <View style={styles.container}>
-        <LinearGradient
-          colors={['#0D47A1', '#1976D2']}
-          style={styles.header}
-        >
-          <Text style={styles.title}>Mis Proyectos Asignados</Text>
-          <Text style={styles.subtitle}>Tienes {proyectos.length} proyectos activos</Text>
-        </LinearGradient>
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#3A7BD5" />
+      
+      <LinearGradient
+        colors={['#3A7BD5', '#00D2FF']}
+        style={styles.header}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      >
+        <Text style={styles.title}>Mis Proyectos</Text>
+        <Text style={styles.subtitle}>
+          {proyectos.length === 0 ? 'No tienes proyectos asignados' : 
+           proyectos.length === 1 ? '1 proyecto asignado' : 
+           `${proyectos.length} proyectos asignados`}
+        </Text>
+      </LinearGradient>
 
-        {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#0D47A1" />
-            <Text style={styles.loadingText}>Cargando proyectos...</Text>
-          </View>
-        ) : proyectos.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <MaterialIcons name="work-off" size={50} color="#90A4AE" />
-            <Text style={styles.emptyText}>No tienes proyectos asignados</Text>
-          </View>
-        ) : (
-          <FlatList
-            data={proyectos}
-            keyExtractor={(item) => item.id}
-            renderItem={renderProyectoCard}
-            contentContainerStyle={styles.listContent}
-            showsVerticalScrollIndicator={false}
-          />
-        )}
-      </View>
-    </ImageBackground>
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#3A7BD5" />
+          <Text style={styles.loadingText}>Cargando tus proyectos...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={proyectos}
+          keyExtractor={(item) => item.id}
+          renderItem={renderProyectoCard}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <MaterialIcons name="work-outline" size={60} color="#CFD8DC" />
+              <Text style={styles.emptyTitle}>No hay proyectos</Text>
+              <Text style={styles.emptySubtitle}>No tienes proyectos asignados actualmente</Text>
+            </View>
+          }
+        />
+      )}
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  background: {
-    flex: 1,
-  },
   container: {
     flex: 1,
+    backgroundColor: '#F5F9FF',
   },
   header: {
     padding: 24,
     paddingTop: 50,
     paddingBottom: 20,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 8,
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+    marginBottom: 10,
   },
   title: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: '700',
     color: '#FFFFFF',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#E3F2FD',
-    opacity: 0.9,
+    fontSize: 15,
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontWeight: '500',
   },
   listContent: {
-    padding: 16,
-    paddingBottom: 32,
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+    paddingTop: 8,
   },
   card: {
-    borderRadius: 16,
+    borderRadius: 14,
     marginBottom: 16,
-    shadowColor: '#000',
+    shadowColor: '#3A7BD5',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 6,
-    elevation: 4,
+    elevation: 3,
   },
   cardGradient: {
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 14,
+    padding: 18,
   },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
   },
+  iconContainer: {
+    backgroundColor: 'rgba(58, 123, 213, 0.1)',
+    borderRadius: 10,
+    padding: 8,
+    marginRight: 12,
+  },
   nombre: {
-    fontWeight: '700',
-    fontSize: 18,
-    color: '#0D47A1',
-    marginLeft: 10,
+    fontWeight: '600',
+    fontSize: 17,
+    color: '#2C3E50',
+    flex: 1,
   },
   descripcion: {
-    color: '#546E7A',
+    color: '#7F8C8D',
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 16,
@@ -167,16 +190,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: '#BBDEFB',
     paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(58, 123, 213, 0.1)',
+  },
+  estadoContainer: {
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
   estado: {
-    backgroundColor: '#E3F2FD',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    color: '#0D47A1',
     fontSize: 12,
     fontWeight: '600',
   },
@@ -185,32 +208,43 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   verTareasText: {
-    color: '#0D47A1',
-    fontWeight: '600',
-    marginRight: 5,
+    color: '#3A7BD5',
+    fontWeight: '500',
+    marginRight: 6,
+    fontSize: 14,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 40,
   },
   loadingText: {
     marginTop: 16,
-    color: '#0D47A1',
+    color: '#3A7BD5',
     fontSize: 16,
+    fontWeight: '500',
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 40,
+    marginTop: 50,
   },
-  emptyText: {
-    marginTop: 16,
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
     color: '#90A4AE',
-    fontSize: 16,
+    marginTop: 16,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: '#B0BEC5',
     textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
   },
 });
 
-export default HomeMiembro; 
+export default HomeMiembro;

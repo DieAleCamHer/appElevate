@@ -5,42 +5,19 @@ import {
   FlatList,
   StyleSheet,
   TouchableOpacity,
-  Animated,
-  Easing
+  ActivityIndicator,
+  StatusBar
 } from 'react-native';
-import {
-  collection,
-  query,
-  where,
-  getDocs
-} from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
-import { LinearGradient } from 'expo-linear-gradient';
-import Icon from 'react-native-vector-icons/MaterialIcons';
+import { MaterialIcons } from '@expo/vector-icons';
 
 const TareasProyectoMiembro = ({ route, navigation }) => {
   const { proyectoId, userId } = route.params;
   const [tareas, setTareas] = useState([]);
-
-  // Animaciones
-  const fadeAnim = useState(new Animated.Value(0))[0];
-  const slideAnim = useState(new Animated.Value(50))[0];
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 800,
-        easing: Easing.out(Easing.back(1)),
-        useNativeDriver: true,
-      })
-    ]).start();
-
     obtenerTareasAsignadas();
   }, []);
 
@@ -52,154 +29,251 @@ const TareasProyectoMiembro = ({ route, navigation }) => {
         where('miembros', 'array-contains', userId)
       );
       const snapshot = await getDocs(q);
-      const datos = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const datos = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        avance: doc.data().avance || 0
+      }));
       setTareas(datos);
     } catch (error) {
       console.error('Error al obtener tareas asignadas:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  return (
-    <LinearGradient colors={['#E0F7FA', '#B2EBF2', '#80DEEA']} style={styles.background}>
-      <Animated.View style={[styles.header, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="arrow-back" size={24} color="#00796B" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Mis Tareas Asignadas</Text>
-      </Animated.View>
+  const renderEmptyComponent = () => (
+    <View style={styles.emptyContainer}>
+      <MaterialIcons name="assignment" size={60} color="#CFD8DC" />
+      <Text style={styles.emptyTitle}>No hay tareas</Text>
+      <Text style={styles.emptySubtitle}>No tienes tareas asignadas en este proyecto</Text>
+    </View>
+  );
 
-      <Animated.View style={[styles.tasksContainer, { opacity: fadeAnim }]}>
-        {tareas.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Icon name="assignment" size={50} color="#90A4AE" />
-            <Text style={styles.emptyText}>No tienes tareas asignadas</Text>
-          </View>
-        ) : (
-          <FlatList
-            data={tareas}
-            keyExtractor={item => item.id}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.taskCard}
-                onPress={() =>
-                  navigation.navigate('SubtareasMiembro', {
-                    tareaId: item.id,
-                    userId,
-                    proyectoId,
-                  })
-                }
-              >
-                <View style={styles.taskHeader}>
-                  <Text style={styles.taskName}>{item.nombre}</Text>
-                  <Icon name="chevron-right" size={24} color="#00796B" />
-                </View>
-                
-                <Text style={styles.taskDescription}>{item.descripcion}</Text>
-                
-                <View style={styles.progressContainer}>
-                  <View style={[styles.progressBar, { width: `${item.avance ?? 0}%` }]} />
-                  <Text style={styles.progressText}>{item.avance ?? 0}% completado</Text>
-                </View>
-                
-                <View style={styles.taskFooter}>
-                  <View style={styles.taskInfo}>
-                    <Icon name="event" size={16} color="#7C4DFF" />
-                    <Text style={styles.taskDate}>
-                      {item.fechaEntrega ? new Date(item.fechaEntrega).toLocaleDateString() : 'Sin fecha'}
-                    </Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            )}
-          />
-        )}
-      </Animated.View>
-    </LinearGradient>
+  const renderTaskCard = ({ item }) => (
+    <TouchableOpacity
+      style={styles.taskCard}
+      onPress={() => navigation.navigate('SubtareasMiembro', {
+        tareaId: item.id,
+        userId,
+        proyectoId,
+      })}
+    >
+      <View style={styles.taskHeader}>
+        <View style={styles.iconContainer}>
+          <MaterialIcons name="assignment" size={18} color="#3A7BD5" />
+        </View>
+        <Text style={styles.taskName} numberOfLines={1}>
+          {item.nombre || 'Tarea sin nombre'}
+        </Text>
+        <MaterialIcons name="chevron-right" size={24} color="#3A7BD5" />
+      </View>
+      
+      <Text style={styles.taskDescription} numberOfLines={2}>
+        {item.descripcion || 'Sin descripción disponible'}
+      </Text>
+      
+      <View style={styles.progressContainer}>
+        <Text style={styles.progressText}>{item.avance}% completado</Text>
+        <View style={styles.progressBarBackground}>
+          <View style={[
+            styles.progressBar, 
+            { 
+              width: `${item.avance}%`,
+              backgroundColor: item.avance === 100 ? '#2E7D32' : '#3A7BD5'
+            }
+          ]} />
+        </View>
+      </View>
+      
+      <View style={styles.taskFooter}>
+        <View style={styles.taskInfo}>
+          <MaterialIcons name="event" size={16} color="#7F8C8D" />
+          <Text style={styles.taskDate}>
+            {item.fechaEntrega ? new Date(item.fechaEntrega).toLocaleDateString() : 'Sin fecha'}
+          </Text>
+        </View>
+        <View style={[
+          styles.statusBadge,
+          { 
+            backgroundColor: item.estado === 'Completado' ? '#E8F5E9' : 
+                           item.estado === 'En pausa' ? '#FFF8E1' : '#E3F2FD'
+          }
+        ]}>
+          <Text style={[
+            styles.statusText,
+            {
+              color: item.estado === 'Completado' ? '#2E7D32' : 
+                     item.estado === 'En pausa' ? '#F57F17' : '#1565C0'
+            }
+          ]}>
+            {item.estado || 'En progreso'}
+          </Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  return (
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#3A7BD5" />
+      
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Tareas del Proyecto</Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#3A7BD5" />
+          <Text style={styles.loadingText}>Cargando tus tareas...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={tareas}
+          keyExtractor={item => item.id}
+          renderItem={renderTaskCard}
+          contentContainerStyle={styles.listContent}
+          ListEmptyComponent={renderEmptyComponent}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  background: {
+  container: {
     flex: 1,
+    backgroundColor: '#F5F9FF',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 25,
-    paddingHorizontal: 20,
+    justifyContent: 'space-between',
+    padding: 20,
+    paddingTop: 50,
+    paddingBottom: 20,
+    backgroundColor: '#3A7BD5',
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+    marginBottom: 10,
   },
   backButton: {
-    marginRight: 15,
+    width: 24,
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#00796B',
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    textAlign: 'center',
     flex: 1,
   },
-  tasksContainer: {
-    flex: 1,
-    paddingHorizontal: 20,
-    marginBottom: 20,
+  listContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+    paddingTop: 8,
   },
-  emptyContainer: {
-    alignItems: 'center',
+  loadingContainer: {
+    flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
     padding: 40,
   },
-  emptyText: {
+  loadingText: {
+    marginTop: 16,
+    color: '#3A7BD5',
     fontSize: 16,
+    fontWeight: '500',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+    marginTop: 50,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
     color: '#90A4AE',
-    marginTop: 10,
+    marginTop: 16,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: '#B0BEC5',
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
   },
   taskCard: {
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 15,
-    shadowColor: '#000',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 18,
+    marginBottom: 16,
+    shadowColor: '#3A7BD5',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
+    shadowRadius: 6,
     elevation: 3,
   },
   taskHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  iconContainer: {
+    backgroundColor: 'rgba(58, 123, 213, 0.1)',
+    borderRadius: 8,
+    padding: 6,
+    marginRight: 12,
   },
   taskName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#263238',
+    color: '#2C3E50',
     flex: 1,
   },
   taskDescription: {
     fontSize: 14,
-    color: '#546E7A',
-    marginBottom: 15,
+    color: '#7F8C8D',
+    lineHeight: 20,
+    marginBottom: 16,
   },
   progressContainer: {
-    height: 10,
-    backgroundColor: '#ECEFF1',
-    borderRadius: 5,
-    marginBottom: 15,
-    overflow: 'hidden',
-  },
-  progressBar: {
-    height: '100%',
-    backgroundColor: '#7C4DFF',
-    borderRadius: 5,
+    marginBottom: 16,
   },
   progressText: {
     fontSize: 12,
     color: '#78909C',
-    textAlign: 'right',
+    marginBottom: 4,
+    fontWeight: '500',
+  },
+  progressBarBackground: {
+    height: 6,
+    backgroundColor: '#ECEFF1',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressBar: {
+    height: '100%',
+    borderRadius: 3,
   },
   taskFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(58, 123, 213, 0.1)',
   },
   taskInfo: {
     flexDirection: 'row',
@@ -208,8 +282,17 @@ const styles = StyleSheet.create({
   taskDate: {
     fontSize: 12,
     color: '#78909C',
-    marginLeft: 5,
+    marginLeft: 6,
+  },
+  statusBadge: {
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
 });
 
-export default TareasProyectoMiembro; 
+export default TareasProyectoMiembro;

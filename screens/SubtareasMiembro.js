@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, FlatList, StyleSheet, Modal, TextInput, Alert, TouchableOpacity, 
-  ScrollView, StatusBar, ActivityIndicator, ImageBackground
+  ScrollView, StatusBar, ActivityIndicator
 } from 'react-native';
 import {
   collection, query, where, getDocs, updateDoc, doc, addDoc, Timestamp, getDoc
@@ -12,7 +12,7 @@ import { calcularAvanceSubtareas, calcularAvanceTareas } from '../utils/calcular
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons, AntDesign } from '@expo/vector-icons';
 
-const SubtareasMiembro = ({ route }) => {
+const SubtareasMiembro = ({ route, navigation }) => {
   const { tareaId, userId, proyectoId } = route.params;
   const [subtareas, setSubtareas] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
@@ -112,7 +112,14 @@ const SubtareasMiembro = ({ route }) => {
       setNuevoEstado('');
       setSubtareaSeleccionada(null);
       obtenerSubtareas();
-      Alert.alert('Éxito', 'Estado actualizado correctamente');
+      
+      // Mostrar feedback visual de éxito
+      Alert.alert(
+        '✅ Estado actualizado',
+        `Has cambiado el estado a "${estadoFinal}"`,
+        [{ text: 'OK', onPress: () => {} }],
+        { cancelable: false }
+      );
     } catch (error) {
       console.error('Error al cambiar estado:', error);
       Alert.alert('Error', 'No se pudo actualizar el estado');
@@ -126,6 +133,16 @@ const SubtareasMiembro = ({ route }) => {
       case ESTADOS.FINALIZADO: return '#4CAF50';
       case ESTADOS.ENTREGA_TARDIA: return '#F44336';
       default: return '#9E9E9E';
+    }
+  };
+
+  const getEstadoIcon = (estado) => {
+    switch(estado) {
+      case ESTADOS.PENDIENTE: return 'pending-actions';
+      case ESTADOS.EN_PROGRESO: return 'hourglass-full';
+      case ESTADOS.FINALIZADO: return 'check-circle';
+      case ESTADOS.ENTREGA_TARDIA: return 'warning';
+      default: return 'help-outline';
     }
   };
 
@@ -146,279 +163,301 @@ const SubtareasMiembro = ({ route }) => {
   }, []);
 
   return (
-    <ImageBackground 
-      source={require('../assets/logo.png')} 
-      style={styles.background}
-      resizeMode="cover"
-    >
-      <StatusBar barStyle="light-content" backgroundColor="#0D47A1" />
-      <View style={styles.container}>
-        <LinearGradient
-          colors={['#0D47A1', '#1976D2']}
-          style={styles.header}
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#3A7BD5" />
+      
+      {/* Header */}
+      <LinearGradient
+        colors={['#3A7BD5', '#00D2FF']}
+        style={styles.header}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      >
+        <TouchableOpacity 
+          onPress={() => navigation.goBack()} 
+          style={styles.backButton}
         >
-          <Text style={styles.title}>Subtareas Asignadas</Text>
-          <Text style={styles.subtitle}>
-            {subtareas.length} {subtareas.length === 1 ? 'subtarea' : 'subtareas'} en total
-          </Text>
-        </LinearGradient>
+          <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Subtareas</Text>
+        <View style={{ width: 24 }} />
+      </LinearGradient>
 
-        {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#0D47A1" />
-            <Text style={styles.loadingText}>Cargando subtareas...</Text>
-          </View>
-        ) : subtareas.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <MaterialIcons name="assignment" size={50} color="#90A4AE" />
-            <Text style={styles.emptyText}>No tienes subtareas asignadas</Text>
-          </View>
-        ) : (
-          <FlatList
-            data={subtareas}
-            keyExtractor={item => item.id}
-            contentContainerStyle={styles.listContent}
-            renderItem={({ item }) => (
-              <TouchableOpacity 
-                style={styles.card}
-                onPress={() => {
-                  setSubtareaSeleccionada(item);
-                  setModalVisible(true);
-                }}
-              >
-                <View style={styles.cardHeader}>
+      {/* Contenido */}
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#3A7BD5" />
+          <Text style={styles.loadingText}>Cargando subtareas...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={subtareas}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.listContent}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <MaterialIcons name="assignment" size={60} color="#CFD8DC" />
+              <Text style={styles.emptyTitle}>No hay subtareas</Text>
+              <Text style={styles.emptySubtitle}>No tienes subtareas asignadas en esta tarea</Text>
+            </View>
+          }
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.taskCard}
+              onPress={() => {
+                setSubtareaSeleccionada(item);
+                setModalVisible(true);
+              }}
+            >
+              <View style={styles.taskHeader}>
+                <View style={styles.iconContainer}>
                   <MaterialIcons 
-                    name="assignment" 
-                    size={24} 
+                    name={getEstadoIcon(item.estado)} 
+                    size={20} 
                     color={getEstadoColor(item.estado)} 
                   />
-                  <Text style={styles.cardTitle}>{item.nombre}</Text>
                 </View>
-                
-                <View style={styles.cardBody}>
-                  <View style={styles.statusBadge(item.estado)}>
-                    <Text style={styles.statusText}>{item.estado || 'pendiente'}</Text>
-                  </View>
-                  
-                  {item.descripcion && (
-                    <Text style={styles.description}>{item.descripcion}</Text>
-                  )}
-                  
-                  {item.fechaEntrega && (
-                    <View style={styles.dateContainer}>
-                      <MaterialIcons name="schedule" size={16} color="#757575" />
-                      <Text style={styles.dateText}>
-                        Entrega: {formatFecha(item.fechaEntrega)}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-                
-                <View style={styles.cardFooter}>
-                  <Text style={styles.actionText}>Toca para cambiar estado</Text>
-                  <AntDesign name="right" size={16} color="#0D47A1" />
-                </View>
-              </TouchableOpacity>
-            )}
-          />
-        )}
-
-        {/* Modal */}
-        <Modal visible={modalVisible} transparent animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Actualizar Estado</Text>
-              <Text style={styles.modalSubtitle}>{subtareaSeleccionada?.nombre}</Text>
-              
-              <ScrollView style={styles.estadosContainer}>
-                {listaEstados.map((estado) => (
-                  <TouchableOpacity
-                    key={estado}
-                    onPress={() => setNuevoEstado(estado)}
-                    style={[
-                      styles.estadoBtn, 
-                      nuevoEstado === estado && styles.estadoBtnSeleccionado(estado)
-                    ]}
-                  >
-                    <MaterialIcons 
-                      name={
-                        estado === ESTADOS.PENDIENTE ? 'pending-actions' :
-                        estado === ESTADOS.EN_PROGRESO ? 'hourglass-full' :
-                        estado === ESTADOS.FINALIZADO ? 'check-circle' :
-                        'warning'
-                      } 
-                      size={20} 
-                      color={getEstadoColor(estado)} 
-                    />
-                    <Text style={styles.estadoBtnTexto}>{estado}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-              
-              <Text style={styles.inputLabel}>Comentario (requerido)</Text>
-              <TextInput
-                placeholder="Explica el cambio de estado..."
-                placeholderTextColor="#90A4AE"
-                style={styles.input}
-                value={comentario}
-                onChangeText={setComentario}
-                multiline
-                numberOfLines={3}
-              />
-              
-              <View style={styles.modalButtons}>
-                <TouchableOpacity 
-                  style={styles.cancelButton}
-                  onPress={() => {
-                    setModalVisible(false);
-                    setComentario('');
-                    setNuevoEstado('');
-                  }}
-                >
-                  <Text style={styles.cancelButtonText}>Cancelar</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity 
-                  style={styles.saveButton}
-                  onPress={cambiarEstado}
-                  disabled={!nuevoEstado || !comentario}
-                >
-                  <Text style={styles.saveButtonText}>Guardar Cambios</Text>
-                </TouchableOpacity>
+                <Text style={styles.taskName} numberOfLines={1}>
+                  {item.nombre || 'Subtarea sin nombre'}
+                </Text>
+                <MaterialIcons name="chevron-right" size={24} color="#3A7BD5" />
               </View>
+              
+              <Text style={styles.taskDescription} numberOfLines={2}>
+                {item.descripcion || 'Sin descripción disponible'}
+              </Text>
+              
+              {item.fechaEntrega && (
+                <View style={styles.dateContainer}>
+                  <MaterialIcons name="event" size={16} color="#7F8C8D" />
+                  <Text style={styles.dateText}>
+                    {formatFecha(item.fechaEntrega)}
+                  </Text>
+                </View>
+              )}
+              
+              <View style={styles.taskFooter}>
+                <View style={[
+                  styles.statusBadge,
+                  { backgroundColor: getEstadoColor(item.estado) + '20' }
+                ]}>
+                  <Text style={[styles.statusText, { color: getEstadoColor(item.estado) }]}>
+                    {item.estado || 'Pendiente'}
+                  </Text>
+                </View>
+                <Text style={styles.changeStatusText}>Cambiar estado</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+        />
+      )}
+
+      {/* Modal para cambiar estado */}
+      <Modal visible={modalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Cambiar Estado</Text>
+            <Text style={styles.modalSubtitle}>{subtareaSeleccionada?.nombre}</Text>
+            
+            <ScrollView style={styles.estadosContainer}>
+              {listaEstados.map((estado) => (
+                <TouchableOpacity
+                  key={estado}
+                  onPress={() => setNuevoEstado(estado)}
+                  style={[
+                    styles.estadoBtn,
+                    nuevoEstado === estado && {
+                      backgroundColor: getEstadoColor(estado) + '20',
+                      borderColor: getEstadoColor(estado)
+                    }
+                  ]}
+                >
+                  <MaterialIcons 
+                    name={getEstadoIcon(estado)}
+                    size={20} 
+                    color={getEstadoColor(estado)} 
+                  />
+                  <Text style={styles.estadoBtnTexto}>{estado}</Text>
+                  {nuevoEstado === estado && (
+                    <MaterialIcons name="check" size={20} color={getEstadoColor(estado)} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            
+            <Text style={styles.inputLabel}>Comentario (requerido)</Text>
+            <TextInput
+              placeholder="Explica el motivo del cambio de estado..."
+              placeholderTextColor="#90A4AE"
+              style={styles.input}
+              value={comentario}
+              onChangeText={setComentario}
+              multiline
+              numberOfLines={3}
+            />
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={styles.cancelButton}
+                onPress={() => {
+                  setModalVisible(false);
+                  setComentario('');
+                  setNuevoEstado('');
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[
+                  styles.saveButton,
+                  (!nuevoEstado || !comentario) && styles.saveButtonDisabled
+                ]}
+                onPress={cambiarEstado}
+                disabled={!nuevoEstado || !comentario}
+              >
+                <Text style={styles.saveButtonText}>Confirmar Cambio</Text>
+              </TouchableOpacity>
             </View>
           </View>
-        </Modal>
-      </View>
-    </ImageBackground>
+        </View>
+      </Modal>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  background: {
-    flex: 1,
-  },
   container: {
     flex: 1,
+    backgroundColor: '#F5F9FF',
   },
   header: {
-    padding: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 20,
     paddingTop: 50,
     paddingBottom: 20,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 8,
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+    marginBottom: 10,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: '700',
+  backButton: {
+    width: 24,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '600',
     color: '#FFFFFF',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#E3F2FD',
-    opacity: 0.9,
+    textAlign: 'center',
+    flex: 1,
   },
   listContent: {
-    padding: 16,
-    paddingBottom: 32,
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+    paddingTop: 8,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 40,
   },
   loadingText: {
     marginTop: 16,
-    color: '#0D47A1',
+    color: '#3A7BD5',
     fontSize: 16,
+    fontWeight: '500',
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 40,
+    marginTop: 50,
   },
-  emptyText: {
-    marginTop: 16,
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
     color: '#90A4AE',
-    fontSize: 16,
-    textAlign: 'center',
+    marginTop: 16,
   },
-  card: {
+  emptySubtitle: {
+    fontSize: 14,
+    color: '#B0BEC5',
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
+  },
+  taskCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 14,
+    padding: 18,
     marginBottom: 16,
-    shadowColor: '#000',
+    shadowColor: '#3A7BD5',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 6,
     elevation: 3,
   },
-  cardHeader: {
+  taskHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
   },
-  cardTitle: {
+  iconContainer: {
+    backgroundColor: 'rgba(58, 123, 213, 0.1)',
+    borderRadius: 8,
+    padding: 6,
+    marginRight: 12,
+  },
+  taskName: {
+    fontSize: 16,
     fontWeight: '600',
-    fontSize: 18,
-    color: '#263238',
-    marginLeft: 10,
+    color: '#2C3E50',
     flex: 1,
   },
-  cardBody: {
-    marginBottom: 12,
-  },
-  statusBadge: (estado) => ({
-    backgroundColor: estado === ESTADOS.PENDIENTE ? '#FFF3E0' :
-                    estado === ESTADOS.EN_PROGRESO ? '#E3F2FD' :
-                    estado === ESTADOS.FINALIZADO ? '#E8F5E9' :
-                    '#FFEBEE',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
-    marginBottom: 10,
-  }),
-  statusText: {
-    fontWeight: '600',
+  taskDescription: {
     fontSize: 14,
-    color: '#263238',
-  },
-  description: {
-    color: '#546E7A',
-    fontSize: 14,
+    color: '#7F8C8D',
     lineHeight: 20,
-    marginBottom: 10,
+    marginBottom: 16,
   },
   dateContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 5,
+    marginBottom: 12,
   },
   dateText: {
-    color: '#757575',
     fontSize: 12,
-    marginLeft: 5,
+    color: '#78909C',
+    marginLeft: 6,
   },
-  cardFooter: {
+  taskFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: '#ECEFF1',
     paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(58, 123, 213, 0.1)',
   },
-  actionText: {
-    color: '#0D47A1',
-    fontSize: 14,
+  statusBadge: {
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  changeStatusText: {
+    fontSize: 12,
+    color: '#3A7BD5',
     fontWeight: '500',
   },
   modalOverlay: {
@@ -437,7 +476,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#0D47A1',
+    color: '#3A7BD5',
     marginBottom: 5,
     textAlign: 'center',
   },
@@ -460,19 +499,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ECEFF1',
   },
-  estadoBtnSeleccionado: (estado) => ({
-    backgroundColor: estado === ESTADOS.PENDIENTE ? '#FFF3E0' :
-                    estado === ESTADOS.EN_PROGRESO ? '#E3F2FD' :
-                    estado === ESTADOS.FINALIZADO ? '#E8F5E9' :
-                    '#FFEBEE',
-    borderColor: estado === ESTADOS.PENDIENTE ? '#FFA000' :
-                 estado === ESTADOS.EN_PROGRESO ? '#2196F3' :
-                 estado === ESTADOS.FINALIZADO ? '#4CAF50' :
-                 '#F44336',
-  }),
   estadoBtnTexto: {
     fontWeight: '600',
-    fontSize: 16,
+    fontSize: 14,
     marginLeft: 10,
     color: '#263238',
     flex: 1,
@@ -512,11 +541,10 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     flex: 1,
-    backgroundColor: '#0D47A1',
+    backgroundColor: '#3A7BD5',
     borderRadius: 8,
     padding: 14,
     alignItems: 'center',
-    opacity: 1,
   },
   saveButtonDisabled: {
     opacity: 0.5,
@@ -524,7 +552,7 @@ const styles = StyleSheet.create({
   saveButtonText: {
     color: '#FFFFFF',
     fontWeight: '600',
-  }, 
+  },
 });
 
-export default SubtareasMiembro; 
+export default SubtareasMiembro;

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, Alert, StyleSheet,
-  Image, Animated, AppState, KeyboardAvoidingView, Platform, Easing
+  Image, Animated, KeyboardAvoidingView, Platform, StatusBar
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { auth, db } from '../firebaseConfig';
@@ -13,43 +13,16 @@ const LoginScreen = ({ navigation }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [activeField, setActiveField] = useState(null);
 
-  const usernameRef = useRef(null);
   const passwordRef = useRef(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const cardScale = useRef(new Animated.Value(0.95)).current;
-  const inputFocusAnim = useRef(new Animated.Value(0)).current;
-  const appState = useRef(AppState.currentState);
 
   useEffect(() => {
-    const initAnimations = () => {
-      fadeAnim.setValue(0);
-      cardScale.setValue(0.95);
-      inputFocusAnim.setValue(0);
-      Animated.parallel([
-        Animated.timing(fadeAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
-        Animated.spring(cardScale, { toValue: 1, friction: 5, useNativeDriver: true })
-      ]).start();
-    };
-
-    initAnimations();
-    const sub = AppState.addEventListener('change', (nextState) => {
-      if (appState.current.match(/inactive|background/) && nextState === 'active') {
-        initAnimations();
-      }
-      appState.current = nextState;
-    });
-
-    return () => sub.remove();
-  }, []);
-
-  useEffect(() => {
-    Animated.timing(inputFocusAnim, {
-      toValue: activeField ? 1 : 0,
-      duration: 200,
-      easing: Easing.out(Easing.quad),
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 800,
       useNativeDriver: true,
     }).start();
-  }, [activeField]);
+  }, []);
 
   const handleChange = (name, value) => {
     setForm(prev => ({ ...prev, [name]: value }));
@@ -94,109 +67,97 @@ const LoginScreen = ({ navigation }) => {
     }
   };
 
-  const inputScale = inputFocusAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.02] });
-
   return (
-    <LinearGradient colors={['#E0F7FA', '#B2EBF2', '#80DEEA']} style={styles.background}>
+    <LinearGradient 
+      colors={['#E0F7FA', '#B2EBF2']}
+      style={styles.background}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+    >
+      <StatusBar barStyle="dark-content" backgroundColor="#E0F7FA" />
+      
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
       >
-        <Animated.View style={[styles.card, { opacity: fadeAnim, transform: [{ scale: cardScale }] }]}>
-          <Animated.View style={[styles.logoContainer, {
-            transform: [{
-              translateY: inputFocusAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0, -10]
-              })
-            }]
-          }]}>
-            <Image source={require('../assets/logo.png')} style={styles.logo} resizeMode="contain" />
-          </Animated.View>
-
-          <Animated.View style={{
-            opacity: fadeAnim,
-            transform: [{
-              translateY: fadeAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] })
-            }]
-          }}>
-            <Text style={styles.title}>Bienvenido</Text>
-            <Text style={styles.subtitle}>Ingresa a tu cuenta</Text>
-          </Animated.View>
-
-          {/* Usuario */}
-          <Animated.View style={[styles.inputContainer, activeField === 'username' && styles.inputContainerActive, {
-            transform: [{ scale: activeField === 'username' ? inputScale : 1 }]
-          }]}>
-            <Text style={[styles.inputLabel, activeField === 'username' && styles.inputLabelActive]}>USUARIO</Text>
-            <TextInput
-              ref={usernameRef}
-              style={styles.input}
-              value={form.username}
-              onChangeText={(text) => handleChange('username', text)}
-              placeholder="nombre@empresa.com"
-              placeholderTextColor="#90A4AE"
-              onFocus={() => setActiveField('username')}
-              onBlur={() => setActiveField(null)}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              returnKeyType="next"
-              onSubmitEditing={() => passwordRef.current.focus()}
-              editable={!isLoading}
+        <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
+          <View style={styles.logoContainer}>
+            <Image 
+              source={require('../assets/logo.png')} 
+              style={styles.logo} 
+              resizeMode="contain" 
             />
-          </Animated.View>
+          </View>
 
-          {/* Contraseña */}
-          <Animated.View style={[styles.inputContainer, activeField === 'password' && styles.inputContainerActive, {
-            transform: [{ scale: activeField === 'password' ? inputScale : 1 }]
-          }]}>
-            <Text style={[styles.inputLabel, activeField === 'password' && styles.inputLabelActive]}>CONTRASEÑA</Text>
-            <TextInput
-              ref={passwordRef}
-              style={styles.input}
-              value={form.password}
-              onChangeText={(text) => handleChange('password', text)}
-              placeholder="••••••••"
-              placeholderTextColor="#90A4AE"
-              onFocus={() => setActiveField('password')}
-              onBlur={() => setActiveField(null)}
-              secureTextEntry
-              returnKeyType="done"
-              onSubmitEditing={handleLogin}
-              editable={!isLoading}
-            />
-          </Animated.View>
+          <View style={styles.formContainer}>
+            <Text style={styles.title}>Inicio de Sesión</Text>
+            
+            {/* Campo de Usuario */}
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Usuario</Text>
+              <TextInput
+                style={styles.input}
+                value={form.username}
+                onChangeText={(text) => handleChange('username', text)}
+                placeholder="Ingresa tu usuario"
+                placeholderTextColor="#90A4AE"
+                onFocus={() => setActiveField('username')}
+                onBlur={() => setActiveField(null)}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="next"
+                onSubmitEditing={() => passwordRef.current.focus()}
+                editable={!isLoading}
+              />
+              <View style={[
+                styles.inputLine,
+                activeField === 'username' && styles.inputLineActive
+              ]} />
+            </View>
 
-          {/* Botón */}
-          <TouchableOpacity
-            style={[styles.button, isLoading && styles.buttonDisabled]}
-            onPress={handleLogin}
-            disabled={isLoading}
-            activeOpacity={0.9}
-          >
-            <LinearGradient
-              colors={['#7C4DFF', '#651FFF']}
-              style={styles.buttonGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
+            {/* Campo de Contraseña */}
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Contraseña</Text>
+              <TextInput
+                ref={passwordRef}
+                style={styles.input}
+                value={form.password}
+                onChangeText={(text) => handleChange('password', text)}
+                placeholder="Ingresa tu contraseña"
+                placeholderTextColor="#90A4AE"
+                onFocus={() => setActiveField('password')}
+                onBlur={() => setActiveField(null)}
+                secureTextEntry
+                returnKeyType="done"
+                onSubmitEditing={handleLogin}
+                editable={!isLoading}
+              />
+              <View style={[
+                styles.inputLine,
+                activeField === 'password' && styles.inputLineActive
+              ]} />
+            </View>
+
+            {/* Botón de Ingreso */}
+            <TouchableOpacity
+              style={[styles.button, isLoading && styles.buttonDisabled]}
+              onPress={handleLogin}
+              disabled={isLoading}
+              activeOpacity={0.8}
             >
-              <Animated.Text style={[styles.buttonText, {
-                transform: [{
-                  scale: isLoading ? 1 : inputFocusAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [1, 1.05]
-                  })
-                }]
-              }]}>
-                {isLoading ? 'INGRESANDO...' : 'INGRESAR →'}
-              </Animated.Text>
-            </LinearGradient>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.forgotPassword} disabled={isLoading}>
-            <Text style={styles.forgotPasswordText}>¿Olvidaste tu contraseña?</Text>
-          </TouchableOpacity>
+              <LinearGradient
+                colors={['#00796B', '#00897B']}
+                style={styles.buttonGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+              >
+                <Text style={styles.buttonText}>
+                  {isLoading ? 'INGRESANDO...' : 'INGRESAR'}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         </Animated.View>
       </KeyboardAvoidingView>
     </LinearGradient>
@@ -210,91 +171,74 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: 24,
-    paddingBottom: 24,
   },
-  card: {
-    backgroundColor: 'rgba(255, 255, 255, 0.92)',
-    borderRadius: 28,
-    padding: 36,
-    shadowColor: '#00796B',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.15,
-    shadowRadius: 24,
-    elevation: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
+  content: {
+    paddingHorizontal: 32,
   },
   logoContainer: {
     alignItems: 'center',
     marginBottom: 24,
   },
   logo: {
-    width: 150,
-    height: 150,
+    width: 120,
+    height: 120,
     tintColor: '#00796B',
   },
+  formContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 20,
+    padding: 24,
+    shadowColor: '#00796B',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 5,
+  },
   title: {
-    fontSize: 32,
+    fontSize: 24,
     fontWeight: '700',
     color: '#00796B',
     textAlign: 'center',
-    marginBottom: 8,
-    letterSpacing: 0.5,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#00838F',
-    textAlign: 'center',
-    marginBottom: 36,
-    fontWeight: '500',
+    marginBottom: 24,
   },
   inputContainer: {
-    marginBottom: 28,
-  },
-  inputContainerActive: {
-    zIndex: 1,
+    marginBottom: 20,
   },
   inputLabel: {
     fontSize: 14,
     color: '#00838F',
-    marginBottom: 10,
+    marginBottom: 8,
     fontWeight: '600',
-    letterSpacing: 0.5,
-    opacity: 0.9,
-  },
-  inputLabelActive: {
-    color: '#7C4DFF',
   },
   input: {
-    height: 50,
+    height: 48,
     fontSize: 16,
     color: '#263238',
-    paddingBottom: 8,
     fontWeight: '500',
+    paddingBottom: 8,
   },
   inputLine: {
     height: 2,
     backgroundColor: '#B2DFDB',
-    marginTop: 6,
   },
   inputLineActive: {
-    backgroundColor: '#7C4DFF',
-    height: 3,
+    backgroundColor: '#00796B',
+    height: 2,
   },
   button: {
-    borderRadius: 14,
+    borderRadius: 12,
     overflow: 'hidden',
-    marginTop: 28,
-    shadowColor: '#7C4DFF',
-    shadowOffset: { width: 0, height: 8 },
+    marginTop: 24,
+    shadowColor: '#00796B',
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowRadius: 6,
+    elevation: 4,
   },
   buttonGradient: {
-    paddingVertical: 18,
+    paddingVertical: 16,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   buttonDisabled: {
     opacity: 0.7,
@@ -303,17 +247,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  forgotPassword: {
-    marginTop: 24,
-    alignSelf: 'center',
-  },
-  forgotPasswordText: {
-    color: '#7C4DFF',
-    fontSize: 14,
-    fontWeight: '600',
   },
 });
 
-export default LoginScreen; 
+export default LoginScreen;
