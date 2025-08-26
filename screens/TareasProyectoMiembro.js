@@ -6,7 +6,8 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  StatusBar
+  StatusBar,
+  BackHandler
 } from 'react-native';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
@@ -19,18 +20,27 @@ const TareasProyectoMiembro = ({ route, navigation }) => {
 
   useEffect(() => {
     obtenerTareasAsignadas();
-  }, []);
+
+    // Configurar el comportamiento del botón de retroceso físico
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      navigation.goBack(); // Navegación normal hacia atrás
+      return true; // Previene el comportamiento por defecto
+    });
+
+    return () => backHandler.remove();
+  }, [navigation]);
 
   const obtenerTareasAsignadas = async () => {
     try {
+      setLoading(true);
       const q = query(
         collection(db, 'tareas'),
         where('proyectoId', '==', proyectoId),
         where('miembros', 'array-contains', userId)
       );
       const snapshot = await getDocs(q);
-      const datos = snapshot.docs.map(doc => ({ 
-        id: doc.id, 
+      const datos = snapshot.docs.map(doc => ({
+        id: doc.id,
         ...doc.data(),
         avance: doc.data().avance || 0
       }));
@@ -68,24 +78,26 @@ const TareasProyectoMiembro = ({ route, navigation }) => {
         </Text>
         <MaterialIcons name="chevron-right" size={24} color="#3A7BD5" />
       </View>
-      
+
       <Text style={styles.taskDescription} numberOfLines={2}>
         {item.descripcion || 'Sin descripción disponible'}
       </Text>
-      
+
       <View style={styles.progressContainer}>
         <Text style={styles.progressText}>{item.avance}% completado</Text>
         <View style={styles.progressBarBackground}>
-          <View style={[
-            styles.progressBar, 
-            { 
-              width: `${item.avance}%`,
-              backgroundColor: item.avance === 100 ? '#2E7D32' : '#3A7BD5'
-            }
-          ]} />
+          <View
+            style={[
+              styles.progressBar,
+              {
+                width: `${item.avance}%`,
+                backgroundColor: item.avance === 100 ? '#2E7D32' : '#3A7BD5'
+              }
+            ]}
+          />
         </View>
       </View>
-      
+
       <View style={styles.taskFooter}>
         <View style={styles.taskInfo}>
           <MaterialIcons name="event" size={16} color="#7F8C8D" />
@@ -93,20 +105,26 @@ const TareasProyectoMiembro = ({ route, navigation }) => {
             {item.fechaEntrega ? new Date(item.fechaEntrega).toLocaleDateString() : 'Sin fecha'}
           </Text>
         </View>
-        <View style={[
-          styles.statusBadge,
-          { 
-            backgroundColor: item.estado === 'Completado' ? '#E8F5E9' : 
-                           item.estado === 'En pausa' ? '#FFF8E1' : '#E3F2FD'
-          }
-        ]}>
-          <Text style={[
-            styles.statusText,
+        <View
+          style={[
+            styles.statusBadge,
             {
-              color: item.estado === 'Completado' ? '#2E7D32' : 
-                     item.estado === 'En pausa' ? '#F57F17' : '#1565C0'
+              backgroundColor:
+                item.estado === 'Completado' ? '#E8F5E9' :
+                item.estado === 'En pausa' ? '#FFF8E1' : '#E3F2FD'
             }
-          ]}>
+          ]}
+        >
+          <Text
+            style={[
+              styles.statusText,
+              {
+                color:
+                  item.estado === 'Completado' ? '#2E7D32' :
+                  item.estado === 'En pausa' ? '#F57F17' : '#1565C0'
+              }
+            ]}
+          >
             {item.estado || 'En progreso'}
           </Text>
         </View>
@@ -117,13 +135,26 @@ const TareasProyectoMiembro = ({ route, navigation }) => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#3A7BD5" />
-      
+
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
         </TouchableOpacity>
+
         <Text style={styles.headerTitle}>Tareas del Proyecto</Text>
-        <View style={{ width: 24 }} />
+
+        {/* Botón de actualizar */}
+        <TouchableOpacity
+          style={styles.refreshButton}
+          onPress={obtenerTareasAsignadas}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <MaterialIcons name="refresh" size={22} color="#FFFFFF" />
+          )}
+        </TouchableOpacity>
       </View>
 
       {loading ? (
@@ -176,6 +207,13 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     textAlign: 'center',
     flex: 1,
+  },
+  refreshButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   listContent: {
     paddingHorizontal: 16,

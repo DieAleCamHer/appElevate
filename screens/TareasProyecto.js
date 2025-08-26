@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,9 @@ import {
   Platform,
   Animated,
   Easing,
-  ActivityIndicator
+  ActivityIndicator,
+  Dimensions,
+  BackHandler
 } from 'react-native';
 import {
   collection,
@@ -29,11 +31,13 @@ import {
   arrayRemove,
   getDoc
 } from 'firebase/firestore';
-import { auth, db } from '../firebaseConfig';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { db } from '../firebaseConfig';
 import { LinearGradient } from 'expo-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { calcularAvanceTareas } from '../utils/calcularPorcentaje';
+
+const { width } = Dimensions.get('window');
+const isSmallDevice = width < 375;
 
 const TareasProyecto = ({ route, navigation }) => {
   const { proyectoId, userId } = route.params;
@@ -44,7 +48,6 @@ const TareasProyecto = ({ route, navigation }) => {
   const [searchText, setSearchText] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Estados para modales
   const [modalVisible, setModalVisible] = useState(false);
   const [tareaAEliminar, setTareaAEliminar] = useState(null);
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -63,6 +66,9 @@ const TareasProyecto = ({ route, navigation }) => {
   const fadeAnim = useState(new Animated.Value(0))[0];
   const slideAnim = useState(new Animated.Value(50))[0];
 
+  // Refs para "Hecho" en el teclado
+  const descripcionRef = useRef(null);
+
   useEffect(() => {
     Animated.parallel([
       Animated.timing(fadeAnim, {
@@ -80,7 +86,15 @@ const TareasProyecto = ({ route, navigation }) => {
 
     obtenerTareas();
     obtenerFechaEntregaProyecto();
-  }, []);
+
+    // Configurar el comportamiento del botón de retroceso físico
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      navigation.goBack(); // Navegación normal hacia atrás
+      return true; // Previene el comportamiento por defecto
+    });
+
+    return () => backHandler.remove();
+  }, [navigation]);
 
   const obtenerFechaEntregaProyecto = async () => {
     try {
@@ -103,7 +117,7 @@ const TareasProyecto = ({ route, navigation }) => {
       setLoading(true);
       const q = query(collection(db, 'tareas'), where('proyectoId', '==', proyectoId));
       const querySnapshot = await getDocs(q);
-      const tareasData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const tareasData = querySnapshot.docs.map(docu => ({ id: docu.id, ...docu.data() }));
       setTareas(tareasData);
     } catch (error) {
       console.error('Error al obtener tareas:', error);
@@ -132,12 +146,11 @@ const TareasProyecto = ({ route, navigation }) => {
         avance: 0,
         completada: false
       });
-      
+
       setNombre('');
       setDescripcion('');
       await obtenerTareas();
 
-      // Actualizar avance del proyecto
       const avanceProyecto = await calcularAvanceTareas(proyectoId);
       const proyectoRef = doc(db, 'proyectos', proyectoId);
       await updateDoc(proyectoRef, { avance: avanceProyecto });
@@ -152,13 +165,13 @@ const TareasProyecto = ({ route, navigation }) => {
 
   const confirmarEliminacion = async () => {
     if (!tareaAEliminar) return;
-    
+
     try {
       setLoading(true);
       const userDoc = await getDoc(doc(db, 'usuarios', userId));
       if (userDoc.exists()) {
         const userData = userDoc.data();
-        
+
         if (confirmPassword !== userData.password) {
           Alert.alert('Error', 'Contraseña incorrecta');
           return;
@@ -169,7 +182,6 @@ const TareasProyecto = ({ route, navigation }) => {
         setConfirmPassword('');
         await obtenerTareas();
 
-        // Actualizar avance del proyecto
         const avanceProyecto = await calcularAvanceTareas(proyectoId);
         const proyectoRef = doc(db, 'proyectos', proyectoId);
         await updateDoc(proyectoRef, { avance: avanceProyecto });
@@ -189,19 +201,20 @@ const TareasProyecto = ({ route, navigation }) => {
       setLoading(true);
       const proyectoRef = doc(db, 'proyectos', proyectoId);
       const proyectoSnap = await getDoc(proyectoRef);
-      
+
       if (proyectoSnap.exists()) {
         const proyectoData = proyectoSnap.data();
         const miembrosProyecto = proyectoData.miembros || [];
-        
+
         if (miembrosProyecto.length === 0) {
           setMiembrosDisponibles([]);
           return;
         }
 
-        const q = query(collection(db, 'usuarios'), where('__name__', 'in', miembrosProyecto));
+        // Ojo: IN soporta máx. 10 IDs. Si hay más, trocear en lotes.
+        const q = query(collection(db, 'usuarios'), where('__name__', 'in', miembrosProyecto.slice(0, 10)));
         const querySnapshot = await getDocs(q);
-        const miembros = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const miembros = querySnapshot.docs.map(docu => ({ id: docu.id, ...docu.data() }));
         setMiembrosDisponibles(miembros);
       }
     } catch (error) {
@@ -241,16 +254,16 @@ const TareasProyecto = ({ route, navigation }) => {
     try {
       setTareaSeleccionada(tarea);
       const validUIDs = miembrosUIDs?.filter(uid => uid && uid.trim() !== '') || [];
-      
+
       if (validUIDs.length === 0) {
         setMiembrosAsignados([]);
         setModalVerMiembrosVisible(true);
         return;
       }
 
-      const q = query(collection(db, 'usuarios'), where('__name__', 'in', validUIDs));
+      const q = query(collection(db, 'usuarios'), where('__name__', 'in', validUIDs.slice(0, 10)));
       const querySnapshot = await getDocs(q);
-      const miembros = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const miembros = querySnapshot.docs.map(docu => ({ id: docu.id, ...docu.data() }));
       setMiembrosAsignados(miembros);
       setModalVerMiembrosVisible(true);
     } catch (error) {
@@ -261,14 +274,14 @@ const TareasProyecto = ({ route, navigation }) => {
 
   const eliminarMiembroDeTarea = async () => {
     if (!miembroAEliminar || !tareaSeleccionada) return;
-    
+
     try {
       setLoading(true);
       const tareaRef = doc(db, 'tareas', tareaSeleccionada.id);
       await updateDoc(tareaRef, {
         miembros: arrayRemove(miembroAEliminar)
       });
-      
+
       Alert.alert('Éxito', "Miembro eliminado de la tarea");
       setModalEliminarMiembro(false);
       setMiembroAEliminar(null);
@@ -281,146 +294,144 @@ const TareasProyecto = ({ route, navigation }) => {
     }
   };
 
-  const handleSubtareasPress = (tareaId) => {
-    navigation.navigate('SubtareasTarea', {
-      tareaId,
-      proyectoId,
-      userId
-    });
-  };
-
-  // Filtrar miembros disponibles según búsqueda
-  const miembrosFiltrados = miembrosDisponibles.filter(miembro => 
-    miembro.nombre.toLowerCase().includes(searchText.toLowerCase()) ||
-    miembro.username.toLowerCase().includes(searchText.toLowerCase())
+  // Filtro con null-guards
+  const miembrosFiltrados = miembrosDisponibles.filter(m =>
+    (m?.nombre ?? '').toLowerCase().includes((searchText ?? '').toLowerCase()) ||
+    (m?.username ?? '').toLowerCase().includes((searchText ?? '').toLowerCase())
   );
 
   return (
-    <LinearGradient colors={['#E0F7FA', '#B2EBF2', '#80DEEA']} style={styles.background}>
+    <LinearGradient colors={['#3A7BD5', '#00D2FF']} style={styles.background}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}
       >
-        {/* Header */}
-        <Animated.View style={[styles.header, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-          <TouchableOpacity>
-            <Icon name="arrow-back" size={24} color="#00796B" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Tareas del Proyecto</Text>
-        </Animated.View>
-
-        {/* Fecha de entrega */}
-        <Animated.View style={[styles.projectInfo, { opacity: fadeAnim }]}>
-          <Text style={styles.projectDueDate}>
-            <Icon name="event" size={16} color="#7C4DFF" /> 
-            Fecha de entrega: {fechaEntregaProyecto ? new Date(fechaEntregaProyecto).toLocaleDateString() : 'No definida'}
-          </Text>
-        </Animated.View>
-
-        {/* Formulario de creación */}
-        <Animated.View style={[styles.newTaskCard, { opacity: fadeAnim }]}>
-          <Text style={styles.sectionTitle}>Crear Nueva Tarea</Text>
-          
-          <TextInput
-            style={styles.input}
-            placeholder="Nombre de la tarea *"
-            placeholderTextColor="#90A4AE"
-            value={nombre}
-            onChangeText={setNombre}
-          />
-          
-          <TextInput
-            style={[styles.input, styles.multilineInput]}
-            placeholder="Descripción *"
-            placeholderTextColor="#90A4AE"
-            multiline
-            value={descripcion}
-            onChangeText={setDescripcion}
-          />
-          
-          <TouchableOpacity
-            style={styles.createButton}
-            onPress={crearTarea}
-            disabled={!nombre.trim() || !descripcion.trim()}
+        <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          {/* HEADER */}
+          <LinearGradient
+            colors={['#3A7BD5', '#00D2FF']}
+            style={styles.header}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
           >
-            <LinearGradient
-              colors={['#7C4DFF', '#651FFF']}
-              style={styles.gradientButton}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+              <Icon name="arrow-back" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <Text style={styles.headerTitle}>Tareas del Proyecto</Text>
+
+            <TouchableOpacity onPress={obtenerTareas} style={styles.refreshButton}>
+              <Icon name="refresh" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+          </LinearGradient>
+
+          {/* Fecha de entrega */}
+          <Animated.View style={[styles.projectInfo, { opacity: fadeAnim }]}>
+            <Text style={styles.projectDueDate}>
+              <Icon name="event" size={16} color="#3A7BD5" />{' '}
+              Fecha de entrega: {fechaEntregaProyecto ? new Date(fechaEntregaProyecto).toLocaleDateString() : 'No definida'}
+            </Text>
+          </Animated.View>
+
+          {/* Formulario de creación */}
+          <Animated.View style={[styles.creationContainer, { opacity: fadeAnim }]}>
+            <Text style={styles.sectionTitle}>Crear Nueva Tarea</Text>
+
+            <TextInput
+              style={styles.input}
+              placeholder="Nombre de la tarea *"
+              value={nombre}
+              onChangeText={setNombre}
+              returnKeyType="next"
+              onSubmitEditing={() => descripcionRef.current?.focus()}
+            />
+
+            <TextInput
+              ref={descripcionRef}
+              style={[styles.input, styles.multilineInput]}
+              placeholder="Descripción *"
+              multiline
+              value={descripcion}
+              onChangeText={setDescripcion}
+              returnKeyType="done"
+              blurOnSubmit
+              onSubmitEditing={() => {
+                if (nombre.trim() && descripcion.trim()) crearTarea();
+              }}
+            />
+
+            <TouchableOpacity
+              style={styles.createButton}
+              onPress={crearTarea}
+              disabled={!nombre.trim() || !descripcion.trim()}
             >
               <Text style={styles.createButtonText}>Crear Tarea</Text>
-              <Icon name="add" size={20} color="#FFF" />
-            </LinearGradient>
-          </TouchableOpacity>
-        </Animated.View>
+            </TouchableOpacity>
+          </Animated.View>
 
-        {/* Lista de tareas */}
-        {loading ? (
-          <ActivityIndicator size="large" color="#7C4DFF" style={styles.loader} />
-        ) : (
-          <Animated.View style={[styles.tasksContainer, { opacity: fadeAnim }]}>
-            <Text style={styles.sectionTitle}>Lista de Tareas</Text>
-            
-            {tareas.length === 0 ? (
-              <View style={styles.emptyContainer}>
-                <Icon name="assignment" size={50} color="#90A4AE" />
-                <Text style={styles.emptyText}>No hay tareas creadas</Text>
-              </View>
+          {/* Lista de tareas */}
+          <View style={styles.projectsContainer}>
+            <Text style={styles.projectsTitle}>Lista de Tareas</Text>
+
+            {loading ? (
+              <ActivityIndicator size="large" color="#3A7BD5" style={styles.loader} />
             ) : (
               <FlatList
                 data={tareas}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item }) => (
-                  <TouchableOpacity 
-                    style={styles.taskCard}
-                    onPress={() => handleSubtareasPress(item.id)}
-                  >
-                    <View style={styles.taskHeader}>
-                      <Text style={styles.taskName}>{item.nombre}</Text>
-                      <Text style={styles.taskStatus}>
-                        {item.completada ? (
-                          <Icon name="check-circle" size={20} color="#4CAF50" />
-                        ) : (
-                          <Icon name="pending" size={20} color="#FF9800" />
-                        )}
-                      </Text>
-                    </View>
-                    
-                    <Text style={styles.taskDescription}>{item.descripcion}</Text>
-                    
-                    <View style={styles.progressContainer}>
-                      <View style={[styles.progressBar, { width: `${item.avance ?? 0}%` }]} />
-                      <Text style={styles.progressText}>{item.avance ?? 0}% completado</Text>
-                    </View>
-                    
-                    <View style={styles.taskActions}>
-                      <TouchableOpacity 
+                  <View style={styles.projectCard}>
+                    <TouchableOpacity
+                      onPress={() => navigation.navigate('SubtareasTarea', { tareaId: item.id, proyectoId, userId })}
+                      style={styles.cardContent}
+                    >
+                      <View style={styles.projectHeader}>
+                        <Text style={styles.projectName}>{item.nombre}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          {item.completada ? (
+                            <Icon name="check-circle" size={16} color="#4CAF50" />
+                          ) : (
+                            <Icon name="pending" size={16} color="#FF9800" />
+                          )}
+                        </View>
+                      </View>
+
+                      <Text style={styles.projectDescription}>{item.descripcion}</Text>
+
+                      <View style={styles.progressContainer}>
+                        <View style={[styles.progressBar, { width: `${Math.max(0, Math.min(100, item.avance ?? 0))}%` }]} />
+                        <Text style={styles.progressText}>{item.avance ?? 0}% completado</Text>
+                      </View>
+                    </TouchableOpacity>
+
+                    {/* BOTONES DE ACCIÓN */}
+                    <View style={styles.projectActions}>
+                      <TouchableOpacity
                         style={styles.actionButton}
                         onPress={(e) => {
-                          e.stopPropagation();
+                          e && e.stopPropagation?.();
                           setTareaSeleccionada(item);
                           obtenerMiembrosProyecto();
                           setModalAsignarVisible(true);
                         }}
                       >
-                        <Icon name="person-add" size={20} color="#7C4DFF" />
+                        <Icon name="person-add" size={20} color="#3A7BD5" />
                       </TouchableOpacity>
-                      
-                      <TouchableOpacity 
-                        style={styles.actionButton}
+
+                      <TouchableOpacity
+                        style={styles.membersButton}
                         onPress={(e) => {
-                          e.stopPropagation();
+                          e && e.stopPropagation?.();
                           verMiembrosAsignados(item.miembros || [], item);
                         }}
                       >
-                        <Icon name="people" size={20} color="#7C4DFF" />
+                        <Icon name="people" size={20} color="#3A7BD5" />
                       </TouchableOpacity>
-                      
-                      <TouchableOpacity 
+
+                      <TouchableOpacity
                         style={styles.deleteButton}
                         onPress={(e) => {
-                          e.stopPropagation();
+                          e && e.stopPropagation?.();
                           setTareaAEliminar(item.id);
                           setModalVisible(true);
                         }}
@@ -428,21 +439,27 @@ const TareasProyecto = ({ route, navigation }) => {
                         <Icon name="delete" size={20} color="#e53935" />
                       </TouchableOpacity>
                     </View>
-                  </TouchableOpacity>
+                  </View>
                 )}
-                contentContainerStyle={styles.listContent}
+                ListEmptyComponent={
+                  <View style={styles.emptyContainer}>
+                    <Icon name="assignment" size={50} color="#90A4AE" />
+                    <Text style={styles.emptyText}>No hay tareas creadas</Text>
+                  </View>
+                }
+                scrollEnabled={false}
               />
             )}
-          </Animated.View>
-        )}
+          </View>
+        </ScrollView>
 
-        {/* Modal para confirmar eliminación */}
+        {/* Modal confirmar eliminación */}
         <Modal visible={modalVisible} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Confirmar Eliminación</Text>
               <Text style={styles.deleteMessage}>¿Estás seguro que deseas eliminar esta tarea?</Text>
-              
+
               <TextInput
                 style={styles.passwordInput}
                 placeholder="Ingresa tu contraseña para confirmar"
@@ -451,9 +468,9 @@ const TareasProyecto = ({ route, navigation }) => {
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
               />
-              
+
               <View style={styles.modalActions}>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.cancelButton}
                   onPress={() => {
                     setModalVisible(false);
@@ -462,8 +479,8 @@ const TareasProyecto = ({ route, navigation }) => {
                 >
                   <Text style={styles.cancelButtonText}>Cancelar</Text>
                 </TouchableOpacity>
-                
-                <TouchableOpacity 
+
+                <TouchableOpacity
                   style={styles.confirmButton}
                   onPress={confirmarEliminacion}
                   disabled={loading}
@@ -484,12 +501,12 @@ const TareasProyecto = ({ route, navigation }) => {
           </View>
         </Modal>
 
-        {/* Modal para asignar miembros */}
+        {/* Modal asignar miembros */}
         <Modal visible={modalAsignarVisible} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Asignar Miembro</Text>
-              
+
               <View style={styles.searchContainer}>
                 <Icon name="search" size={20} color="#90A4AE" style={styles.searchIcon} />
                 <TextInput
@@ -500,7 +517,7 @@ const TareasProyecto = ({ route, navigation }) => {
                   onChangeText={setSearchText}
                 />
               </View>
-              
+
               <ScrollView style={styles.modalScroll}>
                 {miembrosFiltrados.length > 0 ? (
                   miembrosFiltrados.map((miembro) => (
@@ -525,9 +542,9 @@ const TareasProyecto = ({ route, navigation }) => {
                   <Text style={styles.emptyMembersText}>No hay miembros disponibles</Text>
                 )}
               </ScrollView>
-              
+
               <View style={styles.modalActions}>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.cancelButton}
                   onPress={() => {
                     setModalAsignarVisible(false);
@@ -537,14 +554,14 @@ const TareasProyecto = ({ route, navigation }) => {
                 >
                   <Text style={styles.cancelButtonText}>Cancelar</Text>
                 </TouchableOpacity>
-                
-                <TouchableOpacity 
+
+                <TouchableOpacity
                   style={styles.confirmButton}
                   onPress={asignarMiembro}
                   disabled={!miembroSeleccionado || loading}
                 >
                   <LinearGradient
-                    colors={['#7C4DFF', '#651FFF']}
+                    colors={['#3A7BD5', '#00D2FF']}
                     style={styles.gradientButton}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 0 }}
@@ -559,63 +576,70 @@ const TareasProyecto = ({ route, navigation }) => {
           </View>
         </Modal>
 
-        {/* Modal para ver miembros asignados */}
+        {/* Modal ver miembros asignados */}
         <Modal visible={modalVerMiembrosVisible} transparent animationType="fade">
           <View style={styles.modalOverlay}>
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>Miembros Asignados</Text>
-              
-              <ScrollView style={styles.modalScroll}>
+            <View style={styles.customAlertContainer}>
+              <Text style={styles.customAlertTitle}>Miembros Asignados</Text>
+
+              <ScrollView style={styles.customAlertScroll}>
                 {miembrosAsignados.length > 0 ? (
-                  miembrosAsignados.map((miembro) => (
-                    <TouchableOpacity
-                      key={miembro.id}
-                      style={styles.memberItem}
-                      onLongPress={() => {
-                        setMiembroAEliminar(miembro.id);
-                        setModalEliminarMiembro(true);
-                      }}
-                    >
-                      <View style={styles.memberAvatar}>
-                        <Icon name="person" size={24} color="#FFF" />
+                  miembrosAsignados.map((miembro, index) => (
+                    <View key={index} style={styles.memberListItem}>
+                      <View style={styles.memberBullet}>
+                        <Icon name="person" size={16} color="#3A7BD5" />
                       </View>
-                      <View style={styles.memberInfo}>
-                        <Text style={styles.memberName}>{miembro.nombre}</Text>
-                        <Text style={styles.memberUsername}>@{miembro.username}</Text>
-                      </View>
-                    </TouchableOpacity>
+                      <Text style={styles.memberListText}>
+                        {miembro.nombre} (@{miembro.username})
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.removeMemberButton}
+                        onPress={() => {
+                          setMiembroAEliminar(miembro.id);
+                          setModalEliminarMiembro(true);
+                          setModalVerMiembrosVisible(false);
+                        }}
+                      >
+                        <Icon name="remove-circle" size={20} color="#e53935" />
+                      </TouchableOpacity>
+                    </View>
                   ))
                 ) : (
-                  <Text style={styles.emptyMembersText}>No hay miembros asignados</Text>
+                  <Text style={styles.memberListText}>No hay miembros asignados</Text>
                 )}
               </ScrollView>
-              
-              <TouchableOpacity 
-                style={styles.closeButton}
+
+              <TouchableOpacity
+                style={styles.customAlertButton}
                 onPress={() => setModalVerMiembrosVisible(false)}
               >
-                <Text style={styles.closeButtonText}>Cerrar</Text>
+                <Text style={styles.customAlertButtonText}>Cerrar</Text>
               </TouchableOpacity>
             </View>
           </View>
         </Modal>
 
-        {/* Modal para confirmar eliminación de miembro */}
+        {/* Modal confirmar eliminación de miembro */}
         <Modal visible={modalEliminarMiembro} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Eliminar Miembro</Text>
-              <Text style={styles.deleteMessage}>¿Quieres eliminar este miembro de la tarea?</Text>
-              
+              <Text style={styles.deleteMessage}>
+                ¿Estás seguro de que quieres eliminar a este miembro de la tarea?
+              </Text>
+
               <View style={styles.modalActions}>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.cancelButton}
-                  onPress={() => setModalEliminarMiembro(false)}
+                  onPress={() => {
+                    setModalEliminarMiembro(false);
+                    setMiembroAEliminar(null);
+                  }}
                 >
                   <Text style={styles.cancelButtonText}>Cancelar</Text>
                 </TouchableOpacity>
-                
-                <TouchableOpacity 
+
+                <TouchableOpacity
                   style={styles.confirmButton}
                   onPress={eliminarMiembroDeTarea}
                   disabled={loading}
@@ -639,206 +663,231 @@ const TareasProyecto = ({ route, navigation }) => {
     </LinearGradient>
   );
 };
+
 const styles = StyleSheet.create({
-  background: {
-    flex: 1,
-    backgroundColor: '#E0F7FA',
-  },
   container: {
     flex: 1,
+    backgroundColor: '#F8FAFF',
   },
-  scrollContainer: {
-    paddingHorizontal: 16,
+  background: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 16,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 20,
-    paddingHorizontal: 20,
-    backgroundColor: '#00796B',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 50 : 40,
+    paddingBottom: 16,
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
-    shadowColor: '#000',
+    shadowColor: '#3A7BD5',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginLeft: 45,
-    flex: 1,
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 5,
+    marginBottom: 4,
   },
   backButton: {
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    borderRadius: 20,
-    padding: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    textAlign: 'center',
+    flex: 1,
+    textShadowColor: 'rgba(0, 0, 0, 0.1)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  refreshButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   projectInfo: {
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    borderRadius: 12,
-    padding: 16,
-    margin: 16,
-    shadowColor: '#000',
+    backgroundColor: 'white',
+    borderRadius: 14,
+    padding: 14,
+    margin: 12,
+    marginTop: 16,
+    elevation: 2,
+    shadowColor: '#3A7BD5',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
+    shadowRadius: 4,
   },
   projectDueDate: {
-    fontSize: 16,
-    color: '#7C4DFF',
+    fontSize: 14,
+    color: '#3A7BD5',
     fontWeight: '600',
   },
-  newTaskCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 20,
-    margin: 16,
-    shadowColor: '#000',
+  creationContainer: {
+    backgroundColor: 'white',
+    borderRadius: 14,
+    padding: 16,
+    margin: 12,
+    marginBottom: 12,
+    elevation: 3,
+    shadowColor: '#3A7BD5',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 6,
-    elevation: 3,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#00796B',
-    marginBottom: 16,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#3A7BD5',
+    marginBottom: 12,
   },
   input: {
-    backgroundColor: '#f5f7fa',
+    borderWidth: 1.2,
+    borderColor: '#E3E9F1',
     borderRadius: 10,
-    padding: 15,
-    marginBottom: 16,
-    fontSize: 16,
+    padding: 14,
+    marginBottom: 12,
+    fontSize: 14,
     color: '#263238',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
+    backgroundColor: '#F9FBFF',
+    minHeight: 20,
   },
   multilineInput: {
-    minHeight: 100,
+    minHeight: 80,
     textAlignVertical: 'top',
+    paddingTop: 12,
   },
   createButton: {
+    backgroundColor: '#3A7BD5',
     borderRadius: 10,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    padding: 14,
+    alignItems: 'center',
+    shadowColor: '#3A7BD5',
+    shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 3,
   },
-  gradientButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 15,
-    backgroundColor: '#00796B',
-  },
   createButtonText: {
     color: '#FFFFFF',
-    fontSize: 16,
     fontWeight: '600',
-    marginLeft: 8,
-  },
-  tasksContainer: {
-    flex: 1,
-    paddingHorizontal: 16,
-    marginBottom: 20,
-  },
-  taskCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  taskHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  taskName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#263238',
-    flex: 1,
-  },
-  taskStatus: {
-    marginLeft: 10,
-  },
-  taskDescription: {
     fontSize: 14,
-    color: '#546E7A',
+  },
+  projectsContainer: {
+    paddingHorizontal: 12,
+  },
+  projectsTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#3A7BD5',
     marginBottom: 12,
-    lineHeight: 20,
+    marginLeft: 4,
+  },
+  projectCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    marginBottom: 12,
+    shadowColor: '#3A7BD5',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(58, 123, 213, 0.04)',
+  },
+  cardContent: {
+    padding: 16,
+  },
+  projectHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+  },
+  projectName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#2C3E50',
+    flex: 1,
+    marginRight: 10,
+  },
+  projectDescription: {
+    color: '#5A6B7C',
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 14,
   },
   progressContainer: {
-    height: 8,
+    height: 6,
     backgroundColor: '#ECEFF1',
-    borderRadius: 4,
-    marginBottom: 12,
+    borderRadius: 3,
+    marginBottom: 6,
     overflow: 'hidden',
   },
   progressBar: {
     height: '100%',
-    backgroundColor: '#7C4DFF',
-    borderRadius: 4,
+    backgroundColor: '#3A7BD5',
+    borderRadius: 3,
   },
   progressText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#78909C',
+    fontWeight: '500',
     textAlign: 'right',
   },
-  taskActions: {
+  projectActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
+    padding: 12,
+    backgroundColor: '#FAFAFA',
     borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    paddingTop: 12,
-    marginTop: 8,
+    borderTopColor: 'rgba(58, 123, 213, 0.08)',
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
   },
   actionButton: {
-    backgroundColor: 'rgba(124, 77, 255, 0.1)',
-    borderRadius: 20,
-    padding: 8,
-    marginLeft: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
+    marginLeft: 10,
+    padding: 6,
+    backgroundColor: 'rgba(58, 123, 213, 0.1)',
+    borderRadius: 8,
+  },
+  membersButton: {
+    marginLeft: 10,
+    padding: 6,
+    backgroundColor: 'rgba(58, 123, 213, 0.1)',
+    borderRadius: 8,
   },
   deleteButton: {
+    marginLeft: 10,
+    padding: 6,
     backgroundColor: 'rgba(229, 57, 53, 0.1)',
-    borderRadius: 20,
-    padding: 8,
-    marginLeft: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
+    borderRadius: 8,
   },
   emptyContainer: {
-    justifyContent: 'center',
     alignItems: 'center',
-    padding: 40,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    margin: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
+    justifyContent: 'center',
+    padding: 30,
+    marginTop: 10,
   },
   emptyText: {
-    fontSize: 16,
-    color: '#90A4AE',
     marginTop: 12,
+    color: '#90A4AE',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  loader: {
+    marginVertical: 30,
   },
   modalOverlay: {
     flex: 1,
@@ -847,143 +896,185 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
   },
   modalCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    width: '90%',
-    maxHeight: '80%',
-    padding: 24,
+    backgroundColor: '#FFF',
+    borderRadius: 14,
+    width: '86%',
+    maxHeight: '78%',
+    padding: 18,
+    elevation: 5,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 5 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
-    shadowRadius: 10,
-    elevation: 10,
+    shadowRadius: 3,
   },
   modalTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#00796B',
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#3A7BD5',
     marginBottom: 16,
     textAlign: 'center',
-  },
-  deleteMessage: {
-    fontSize: 16,
-    color: '#546E7A',
-    marginBottom: 20,
-    textAlign: 'center',
-    lineHeight: 24,
   },
   modalScroll: {
-    maxHeight: '60%',
-    marginBottom: 20,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 20,
-  },
-  cancelButton: {
-    flex: 1,
-    backgroundColor: '#f5f7fa',
-    borderRadius: 10,
-    padding: 14,
-    alignItems: 'center',
-    marginRight: 10,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  cancelButtonText: {
-    color: '#546E7A',
-    fontWeight: '600',
-  },
-  confirmButton: {
-    flex: 1,
-    borderRadius: 10,
-    overflow: 'hidden',
-    backgroundColor: '#E53935',
-  },
-  confirmButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-  },
-  closeButton: {
-    backgroundColor: '#00796B',
-    borderRadius: 10,
-    padding: 14,
-    alignItems: 'center',
-  },
-  closeButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f5f7fa',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  searchIcon: {
-    marginRight: 10,
-    color: '#7C4DFF',
-  },
-  searchInput: {
-    flex: 1,
-    height: 40,
-    color: '#263238',
-  },
-  passwordInput: {
-    backgroundColor: '#f5f7fa',
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 16,
-    fontSize: 16,
-    color: '#263238',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
+    maxHeight: '65%',
   },
   memberItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 10,
-    backgroundColor: '#f5f7fa',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 6,
+    backgroundColor: '#F5F5F5',
   },
   selectedMember: {
-    backgroundColor: 'rgba(124, 77, 255, 0.1)',
+    backgroundColor: 'rgba(58, 123, 213, 0.1)',
     borderWidth: 1,
-    borderColor: '#7C4DFF',
+    borderColor: '#3A7BD5',
   },
   memberAvatar: {
-    backgroundColor: '#7C4DFF',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    backgroundColor: '#3A7BD5',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: 10,
+  },
+  memberInfo: {
+    flex: 1,
   },
   memberName: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: '#263238',
   },
   memberUsername: {
-    fontSize: 14,
+    fontSize: 12,
     color: '#78909C',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 16,
+  },
+  cancelButton: {
+    flex: 1,
+    backgroundColor: '#ECEFF1',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  cancelButtonText: {
+    color: '#78909C',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  confirmButton: {
+    flex: 1,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  gradientButton: {
+    padding: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmButtonText: {
+    color: '#FFF',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  customAlertContainer: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 20,
+    width: '80%',
+    maxHeight: '65%',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+  },
+  customAlertTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#3A7BD5',
+    textAlign: 'center',
+    marginBottom: 14,
+  },
+  customAlertScroll: {
+    maxHeight: '65%',
+    marginBottom: 16,
+  },
+  memberListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  memberBullet: {
+    marginRight: 8,
+  },
+  memberListText: {
+    fontSize: 14,
+    color: '#546E7A',
+    flex: 1,
+    lineHeight: 20,
+  },
+  removeMemberButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  customAlertButton: {
+    backgroundColor: '#3A7BD5',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+  },
+  customAlertButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(236, 239, 241, 0.7)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    marginBottom: 12,
+    height: 40,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    height: 38,
+    color: '#263238',
+    fontSize: 14,
+  },
+  passwordInput: {
+    backgroundColor: 'rgba(236, 239, 241, 0.7)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    fontSize: 14,
+    color: '#263238',
+  },
+  deleteMessage: {
+    fontSize: 14,
+    color: '#546E7A',
+    marginBottom: 16,
+    textAlign: 'center',
+    lineHeight: 20,
   },
   emptyMembersText: {
     textAlign: 'center',
     color: '#90A4AE',
-    fontSize: 16,
+    fontSize: 14,
     padding: 20,
-  },
-  loader: {
-    marginVertical: 40,
   },
 });
 
