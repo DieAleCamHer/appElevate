@@ -79,7 +79,7 @@ const SubtareasMiembro = ({ route, navigation }) => {
             ? subtareaData.fechaEntrega.toDate()
             : null;
         if (fechaEntrega && ahora > fechaEntrega) {
-          estadoFinal = ESTADOS.ENTREGA_TARDIA; // se asigna automáticamente si se finaliza tarde
+          estadoFinal = ESTADOS.ENTREGA_TARDIA; 
         }
       }
 

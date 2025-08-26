@@ -9,7 +9,7 @@ import {
   Timestamp, updateDoc, getDoc
 } from 'firebase/firestore';
 import { db, auth } from '../firebaseConfig';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { calcularAvanceSubtareas, calcularAvanceTareas } from '../utils/calcularPorcentaje';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons, Feather, AntDesign } from '@expo/vector-icons';
@@ -46,10 +46,9 @@ const SubtareasTarea = ({ route, navigation }) => {
 
     refrescar();
 
-    // Configurar el comportamiento del botón de retroceso físico
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
-      navigation.goBack(); // Navegación normal hacia atrás
-      return true; // Previene el comportamiento por defecto
+      navigation.goBack();
+      return true;
     });
 
     return () => backHandler.remove();
@@ -131,8 +130,8 @@ const SubtareasTarea = ({ route, navigation }) => {
         setTaskDate(dateOnly ?? startOfDay(new Date()));
         setTimeEditor(new Date());
       }
-    } catch {
-      // no-op
+    } catch (e) {
+      console.error('obtenerTaskDate:', e);
     }
   };
 
@@ -147,8 +146,8 @@ const SubtareasTarea = ({ route, navigation }) => {
           : data.fechaEntrega || null;
         setProjectDueDate(raw ? endOfDay(raw) : null);
       }
-    } catch {
-      // no-op
+    } catch (e) {
+      console.error('obtenerProjectDueDate:', e);
     }
   };
 
@@ -158,8 +157,8 @@ const SubtareasTarea = ({ route, navigation }) => {
       await updateDoc(doc(db, 'tareas', tareaId), { avance: avanceTarea });
       const avanceProyecto = await calcularAvanceTareas(proyectoId);
       await updateDoc(doc(db, 'proyectos', proyectoId), { avance: avanceProyecto });
-    } catch {
-      // no-op
+    } catch (e) {
+      console.error('actualizarAvance:', e);
     }
   };
 
@@ -175,7 +174,9 @@ const SubtareasTarea = ({ route, navigation }) => {
         fechaCambio: Timestamp.now(),
         ...datosAdicionales
       });
-    } catch { /* no-op */ }
+    } catch (e) {
+      console.error('registrarEnHistorial:', e);
+    }
   };
 
   const onSelectTaskDate = async (selectedDate) => {
@@ -300,14 +301,37 @@ const SubtareasTarea = ({ route, navigation }) => {
       Alert.alert("Error", "Ingresa tu contraseña.");
       return;
     }
+    const user = auth.currentUser;
+    if (!user || !user.email) {
+      Alert.alert('Error', 'No hay sesión activa.');
+      return;
+    }
+
     try {
       setLoading(true);
-      await signInWithEmailAndPassword(auth, userEmail, confirmPassword);
+
+      const credential = EmailAuthProvider.credential(user.email, confirmPassword);
+      await reauthenticateWithCredential(user, credential);
+
       await eliminarSubtarea(subtareaAEliminar);
+
       setModalVisible(false);
       setConfirmPassword('');
-    } catch {
-      Alert.alert('Error', 'Contraseña incorrecta or fallo de conexión');
+    } catch (e) {
+      const code = e?.code || '';
+      if (code === 'auth/wrong-password') {
+        Alert.alert('Error', 'Contraseña incorrecta.');
+      } else if (code === 'auth/too-many-requests') {
+        Alert.alert('Error', 'Demasiados intentos. Intenta más tarde.');
+      } else if (code === 'auth/user-mismatch' || code === 'auth/user-not-found') {
+        Alert.alert('Error', 'Cuenta no coincide con la sesión actual.');
+      } else if (code === 'auth/invalid-credential') {
+        Alert.alert('Error', 'Credenciales inválidas.');
+      } else if (code === 'auth/operation-not-allowed') {
+        Alert.alert('Error', 'Método no permitido para este usuario.');
+      } else {
+        Alert.alert('Error', 'No se pudo verificar la contraseña.');
+      }
       setConfirmPassword('');
     } finally {
       setLoading(false);
@@ -325,7 +349,7 @@ const SubtareasTarea = ({ route, navigation }) => {
     if (!fecha) return '--:--';
     return new Date(fecha).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
   };
-  
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#3a7bd5" />
@@ -565,6 +589,7 @@ const SubtareasTarea = ({ route, navigation }) => {
     </View>
   );
 };
+
 
 const styles = StyleSheet.create({
   container: {
