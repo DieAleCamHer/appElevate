@@ -9,7 +9,9 @@ import {
   ScrollView,
   Modal,
   SafeAreaView,
-  BackHandler
+  BackHandler,
+  Linking,
+  Alert
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialIcons';
@@ -36,10 +38,9 @@ const HistorialProyecto = ({ route, navigation }) => {
   useEffect(() => {
     obtenerHistorial();
 
-    // Configurar el comportamiento del botón de retroceso físico
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
-      navigation.goBack(); // Navegación normal hacia atrás
-      return true; // Previene el comportamiento por defecto
+      navigation.goBack();
+      return true;
     });
 
     return () => backHandler.remove();
@@ -345,6 +346,7 @@ const HistorialProyecto = ({ route, navigation }) => {
           )}
         </ScrollView>
 
+        <FilterModal />
       </LinearGradient>
     </SafeAreaView>
   );
@@ -547,6 +549,20 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 12,
     fontWeight: '700',
+  },
+  fileButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E3F2FD',
+    padding: 8,
+    borderRadius: 6,
+    marginTop: 5,
+    gap: 5,
+  },
+  fileText: {
+    fontSize: 12,
+    color: '#00796B',
+    fontWeight: '500',
   },
   commentText: {
     fontSize: 13,

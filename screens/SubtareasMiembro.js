@@ -4,13 +4,15 @@ import {
   ScrollView, StatusBar, ActivityIndicator
 } from 'react-native';
 import {
-  collection, query, where, getDocs, updateDoc, doc, addDoc, Timestamp, getDoc
+  collection, query, where, getDocs, updateDoc, doc, addDoc, 
+  Timestamp, getDoc
 } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+import { db, auth } from '../firebaseConfig';
 import { ESTADOS, listaEstados } from '../utils/estados';
 import { calcularAvanceSubtareas, calcularAvanceTareas } from '../utils/calcularPorcentaje';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
+import { onAuthStateChanged } from 'firebase/auth';
 
 const SubtareasMiembro = ({ route, navigation }) => {
   const { tareaId, userId, proyectoId } = route.params;
@@ -21,7 +23,10 @@ const SubtareasMiembro = ({ route, navigation }) => {
   const [nuevoEstado, setNuevoEstado] = useState('');
   const [userInfo, setUserInfo] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [gerenteId, setGerenteId] = useState(null);
+  const [userAuthenticated, setUserAuthenticated] = useState(false);
 
+  // 🔹 Función para obtener subtareas
   const obtenerSubtareas = async () => {
     try {
       setLoading(true);
@@ -40,27 +45,73 @@ const SubtareasMiembro = ({ route, navigation }) => {
       });
       setSubtareas(data);
     } catch (error) {
-      Alert.alert('Error', 'No se pudieron cargar las subtareas');
+      console.error('Error detallado:', error);
+      Alert.alert('Error', 'No se pudieron cargar las subtareas: ' + error.message);
     } finally {
       setLoading(false);
     }
   };
 
+  // 🔹 Función para obtener usuario
   const obtenerUsuario = async () => {
     try {
-      const q = query(collection(db, 'usuarios'), where('__name__', '==', userId));
-      const snap = await getDocs(q);
-      if (!snap.empty) setUserInfo(snap.docs[0].data());
-    } catch {
-      // no-op
+      const userDoc = await getDoc(doc(db, 'usuarios', userId));
+      if (userDoc.exists()) {
+        setUserInfo(userDoc.data());
+      }
+    } catch (error) {
+      console.error('Error al obtener usuario:', error);
     }
   };
 
+  // 🔹 Función para obtener gerente
+  const obtenerGerenteId = async () => {
+    try {
+      const proyectoRef = doc(db, 'proyectos', proyectoId);
+      const proyectoSnap = await getDoc(proyectoRef);
+      if (proyectoSnap.exists()) {
+        const proyectoData = proyectoSnap.data();
+        setGerenteId(proyectoData.creadorId);
+      }
+    } catch (error) {
+      console.error('Error al obtener gerente:', error);
+    }
+  };
+
+  // 🔹 Función para crear notificación (COMPATIBLE CON TUS REGLAS)
+// 🔹 Función para crear notificación
+const crearNotificacion = async (mensaje, tipo, userIdDestino, link = "") => {
+  try {
+    // Obtenemos la fecha actual como Timestamp
+    const date = Timestamp.now();
+
+    // Crear el objeto de la notificación con los datos que mencionaste
+    const notificacion = {
+      date: date,  // Marca de tiempo con el formato adecuado
+      message: mensaje,  // El mensaje de la notificación
+      link: link,  // El enlace proporcionado (puede ser vacío)
+      seen: false,  // Estado de si la notificación ha sido vista o no (false por defecto)
+      type: tipo,  // El tipo de la notificación (por ejemplo, "subtarea")
+      userId: userIdDestino  // El ID del usuario al que se destina la notificación
+    };
+
+    // Guardar la notificación en la colección "notificaciones" de Firestore
+    await addDoc(collection(db, "notificaciones"), notificacion);
+
+    console.log('Notificación guardada exitosamente');
+  } catch (error) {
+    console.error('Error al guardar la notificación:', error);
+  }
+};
+
+
+  // 🔹 Función para cambiar estado
   const cambiarEstado = async () => {
     if (!comentario || !nuevoEstado || !subtareaSeleccionada) {
       Alert.alert('Error', 'Debes ingresar un comentario y seleccionar un estado');
       return;
     }
+
     try {
       const subtareaRef = doc(db, 'subtareas', subtareaSeleccionada.id);
       const subtareaSnap = await getDoc(subtareaRef);
@@ -79,7 +130,7 @@ const SubtareasMiembro = ({ route, navigation }) => {
             ? subtareaData.fechaEntrega.toDate()
             : null;
         if (fechaEntrega && ahora > fechaEntrega) {
-          estadoFinal = ESTADOS.ENTREGA_TARDIA; 
+          estadoFinal = ESTADOS.ENTREGA_TARDIA;
         }
       }
 
@@ -88,6 +139,20 @@ const SubtareasMiembro = ({ route, navigation }) => {
         completado: estadoFinal === ESTADOS.FINALIZADO || estadoFinal === ESTADOS.ENTREGA_TARDIA
       });
 
+      if (gerenteId) {
+        const mensajeNotificacion = `El usuario ${userInfo?.nombre || 'Miembro'} ha cambiado el estado de la subtarea "${subtareaSeleccionada.nombre}" a "${estadoFinal}" en el proyecto`;
+        
+        // No esperamos a que termine la notificación para no bloquear el flujo
+        crearNotificacion(
+          mensajeNotificacion,
+          'subtarea',
+          gerenteId,
+          `proyecto:${proyectoId}:tarea:${tareaId}:subtarea:${subtareaSeleccionada.id}`
+        ).catch(error => {
+          console.log('Notificación falló en segundo plano');
+        });
+      }
+
       await addDoc(collection(db, 'historial'), {
         usuarioId: userId,
         usuarioNombre: userInfo?.nombre || '',
@@ -95,6 +160,7 @@ const SubtareasMiembro = ({ route, navigation }) => {
         proyectoId,
         tareaId,
         subtareaId: subtareaSeleccionada.id,
+        estadoAnterior: subtareaData.estado,
         estadoNuevo: estadoFinal,
         comentario,
         fechaCambio: Timestamp.now()
@@ -111,10 +177,12 @@ const SubtareasMiembro = ({ route, navigation }) => {
 
       Alert.alert('Estado actualizado', `Has cambiado el estado a "${estadoFinal}"`);
     } catch (error) {
+      console.error('Error al cambiar estado:', error);
       Alert.alert('Error', 'No se pudo actualizar el estado');
     }
   };
 
+  // 🔹 Funciones de utilidad
   const getEstadoColor = (estado) => {
     switch (estado) {
       case ESTADOS.PENDIENTE: return '#FFA000';
@@ -143,10 +211,44 @@ const SubtareasMiembro = ({ route, navigation }) => {
     });
   };
 
+  // 🔹 useEffect principal - verificar autenticación
   useEffect(() => {
-    obtenerSubtareas();
-    obtenerUsuario();
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setUserAuthenticated(true);
+        obtenerSubtareas();
+        obtenerUsuario();
+        obtenerGerenteId();
+      } else {
+        setUserAuthenticated(false);
+        Alert.alert(
+          'Sesión expirada', 
+          'Por favor inicia sesión nuevamente',
+          [{ text: 'OK', onPress: () => navigation.navigate('Login') }]
+        );
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
+
+  // 🔹 Render condicional
+  if (!userAuthenticated && loading) {
+    return (
+      <View style={styles.centerContainer}>
+        <ActivityIndicator size="large" color="#0000ff" />
+        <Text>Verificando autenticación...</Text>
+      </View>
+    );
+  }
+
+  if (!userAuthenticated) {
+    return (
+      <View style={styles.centerContainer}>
+        <Text>No autenticado. Redirigiendo...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -164,7 +266,6 @@ const SubtareasMiembro = ({ route, navigation }) => {
 
         <Text style={styles.headerTitle}>Subtareas</Text>
 
-        {/* Botón actualizar */}
         <TouchableOpacity
           style={styles.refreshButton}
           onPress={obtenerSubtareas}
@@ -253,7 +354,6 @@ const SubtareasMiembro = ({ route, navigation }) => {
             <Text style={styles.modalTitle}>Cambiar Estado</Text>
             <Text style={styles.modalSubtitle}>{subtareaSeleccionada?.nombre}</Text>
 
-            {/* Oculta 'ENTREGA_TARDIA' del selector */}
             <ScrollView style={styles.estadosContainer}>
               {listaEstados
                 .filter(e => e !== ESTADOS.ENTREGA_TARDIA)
@@ -595,4 +695,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 });
+
 export default SubtareasMiembro;

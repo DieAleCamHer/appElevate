@@ -13,6 +13,10 @@ import {
   Platform,
   ActivityIndicator,
   BackHandler,
+  StatusBar,
+  Animated,
+  Dimensions,
+  Easing
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -28,9 +32,12 @@ import {
   updateDoc,
   arrayUnion,
   arrayRemove,
+  onSnapshot
 } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+import { db, auth } from '../firebaseConfig';
 import Icon from 'react-native-vector-icons/MaterialIcons';
+
+const { width } = Dimensions.get('window');
 
 const HomeGerente = ({ route, navigation }) => {
   const { userId } = route.params || {};
@@ -40,11 +47,9 @@ const HomeGerente = ({ route, navigation }) => {
   const [fechaEntrega, setFechaEntrega] = useState(new Date());
   const [showCreateDatePicker, setShowCreateDatePicker] = useState(false);
   const [showEditDatePicker, setShowEditDatePicker] = useState(false);
-
   const [modalAsignarVisible, setModalAsignarVisible] = useState(false);
   const [miembrosDisponibles, setMiembrosDisponibles] = useState([]);
   const [miembroSeleccionado, setMiembroSeleccionado] = useState(null);
-
   const [proyectoSeleccionado, setProyectoSeleccionado] = useState(null);
   const [proyectoAEliminar, setProyectoAEliminar] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
@@ -58,11 +63,19 @@ const HomeGerente = ({ route, navigation }) => {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [showRemoveMemberModal, setShowRemoveMemberModal] = useState(false);
   const [selectedMemberToRemove, setSelectedMemberToRemove] = useState(null);
+  const [notificaciones, setNotificaciones] = useState([]);
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const slideAnim = useRef(new Animated.Value(-300)).current;
+  const [showFloatingNotification, setShowFloatingNotification] = useState(false);
+  const [lastNotificationCount, setLastNotificationCount] = useState(0);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const floatingNotifAnim = useRef(new Animated.Value(-100)).current;
 
   const descripcionRef = useRef(null);
-
   const hoy = new Date();
   hoy.setHours(0, 0, 0, 0);
+
   const clampFecha = (d) => {
     const x = new Date(d);
     x.setHours(0, 0, 0, 0);
@@ -75,18 +88,121 @@ const HomeGerente = ({ route, navigation }) => {
       (miembro?.username ?? '').toLowerCase().includes((searchText ?? '').toLowerCase())
   );
 
-  
   useEffect(() => {
     obtenerProyectos();
+    setupNotifications();
 
     const backHandler = BackHandler.addEventListener('hardwareBackPress', handleBackPress);
-
     return () => backHandler.remove();
   }, []);
 
+  const setupNotifications = () => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const q = query(
+      collection(db, 'notificaciones'),
+      where('userId', '==', user.uid),
+      where('seen', '==', false)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const newCount = snapshot.size;
+
+      // Mostrar notificación flotante si hay nuevas notificaciones
+      if (newCount > lastNotificationCount && newCount > 0) {
+        mostrarNotificacionFloating();
+      }
+
+      setUnreadNotifications(newCount);
+      setLastNotificationCount(newCount);
+    });
+
+    return unsubscribe;
+  };
+
+  const mostrarNotificacionFloating = () => {
+    setShowFloatingNotification(true);
+
+    // Animación de entrada
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(floatingNotifAnim, {
+          toValue: 0,
+          duration: 500,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 400,
+          useNativeDriver: true,
+        })
+      ]),
+      Animated.delay(3000), // Mostrar por 3 segundos
+      Animated.parallel([
+        Animated.timing(floatingNotifAnim, {
+          toValue: -100,
+          duration: 400,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 400,
+          useNativeDriver: true,
+        })
+      ])
+    ]).start(() => {
+      setShowFloatingNotification(false);
+    });
+  };
+
+  const handleNotificationPress = () => {
+    // Detener animación y navegar a notificaciones
+    floatingNotifAnim.setValue(-100);
+    fadeAnim.setValue(0);
+    setShowFloatingNotification(false);
+    navigation.navigate('Notificaciones');
+  };
+
   const handleBackPress = () => {
     mostrarConfirmacionCerrarSesion();
-    return true; 
+    return true;
+  };
+
+  const toggleMenu = () => {
+    if (menuVisible) {
+      Animated.timing(slideAnim, {
+        toValue: -300,
+        duration: 300,
+        useNativeDriver: true,
+      }).start(() => setMenuVisible(false));
+    } else {
+      setMenuVisible(true);
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    }
+  };
+
+  const handleMenuAction = (action) => {
+    toggleMenu();
+    switch (action) {
+      case 'notifications':
+        navigation.navigate('Notificaciones');
+        break;
+      case 'calendar':
+        navigation.navigate('Calendario');
+        break;
+      case 'logout':
+        mostrarConfirmacionCerrarSesion();
+        break;
+      default:
+        break;
+    }
   };
 
   const mostrarConfirmacionCerrarSesion = () => {
@@ -328,370 +444,113 @@ const HomeGerente = ({ route, navigation }) => {
   };
 
   return (
-    <LinearGradient colors={['#3A7BD5', '#00D2FF']} style={styles.background}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.container}
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#3A7BD5" />
+
+      {/*HEADER*/}
+      <LinearGradient
+        colors={['#3A7BD5', '#2980b9']}
+        style={styles.header}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
       >
-        <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {/* HEADER */}
-          <LinearGradient colors={['#3A7BD5', '#00D2FF']} style={styles.header}>
-            <Text style={styles.headerTitle}>Mis Proyectos</Text>
-            <View style={{ flexDirection: 'row' }}>
-              <TouchableOpacity onPress={obtenerProyectos} style={styles.refreshButton}>
-                <Icon name="refresh" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={mostrarConfirmacionCerrarSesion} style={styles.backButton}>
-                <Icon name="exit-to-app" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-          </LinearGradient>
+        <View style={styles.headerLeft}>
+          <TouchableOpacity onPress={toggleMenu} style={styles.menuButton}>
+            <Icon name="menu" size={28} color="#FFFFFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Panel de Gerente</Text>
+        </View>
 
-          {/* FORMULARIO DE CREACIÓN */}
-          <View style={styles.creationContainer}>
-            <Text style={styles.sectionTitle}>Crear Nuevo Proyecto</Text>
+        <View style={styles.headerRight}>
+          <TouchableOpacity onPress={obtenerProyectos} style={styles.refreshButton}>
+            <Icon name="refresh" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </LinearGradient>
 
-            <TextInput
-              style={styles.input}
-              placeholder="Nombre del proyecto *"
-              value={nombre}
-              onChangeText={setNombre}
-              returnKeyType="next"
-              onSubmitEditing={() => descripcionRef?.current?.focus()}
-            />
-
-            <TextInput
-              ref={descripcionRef}
-              style={[styles.input, styles.multilineInput]}
-              placeholder="Descripción *"
-              multiline
-              value={descripcion}
-              onChangeText={setDescripcion}
-              returnKeyType="done"
-              blurOnSubmit
-              onSubmitEditing={() => {
-                if (nombre.trim() && descripcion.trim()) crearProyecto();
-              }}
-            />
-
-            <TouchableOpacity style={styles.dateButton} onPress={() => setShowCreateDatePicker(true)}>
-              <Icon name="event" size={20} color="#3A7BD5" />
-              <Text style={styles.dateButtonText}>
-                {fechaEntrega.toLocaleDateString() || 'Seleccionar fecha'}
-              </Text>
-            </TouchableOpacity>
-
-            {showCreateDatePicker && (
-              <DateTimePicker
-                value={fechaEntrega}
-                mode="date"
-                display="default"
-                minimumDate={hoy}
-                onChange={(event, selectedDate) => {
-                  setShowCreateDatePicker(false);
-                  if (selectedDate) {
-                    const d = new Date(selectedDate);
-                    d.setHours(0, 0, 0, 0);
-                    if (d < hoy) {
-                      Alert.alert('Fecha inválida', 'Seleccione una fecha a partir de hoy.');
-                      setFechaEntrega(hoy);
-                    } else {
-                      setFechaEntrega(selectedDate);
-                    }
-                  }
-                }}
-              />
-            )}
-
-            <TouchableOpacity
-              style={styles.createButton}
-              onPress={crearProyecto}
-              disabled={!nombre.trim() || !descripcion.trim()}
+      {/* MENÚ HAMBURGUESA */}
+      {menuVisible && (
+        <TouchableOpacity
+          style={styles.menuOverlay}
+          onPress={toggleMenu}
+          activeOpacity={1}
+        >
+          <Animated.View
+            style={[
+              styles.menuContainer,
+              { transform: [{ translateX: slideAnim }] }
+            ]}
+          >
+            <LinearGradient
+              colors={['#2C3E50', '#34495e']}
+              style={styles.menuGradient}
             >
-              <Text style={styles.createButtonText}>Crear Proyecto</Text>
-            </TouchableOpacity>
-          </View>
+              <View style={styles.menuHeader}>
+                <Text style={styles.menuTitle}>Menú</Text>
+                <TouchableOpacity onPress={toggleMenu} style={styles.closeMenuButton}>
+                  <Icon name="close" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
 
-          {/* LISTA DE PROYECTOS */}
-          <View style={styles.projectsContainer}>
-            <Text style={styles.projectsTitle}>Mis Proyectos</Text>
-
-            {loading ? (
-              <ActivityIndicator size="large" color="#3A7BD5" style={styles.loader} />
-            ) : (
-              <FlatList
-                data={proyectos}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
-                  <View style={styles.projectCard}>
-                    <TouchableOpacity
-                      onPress={() =>
-                        navigation.navigate('TareasProyecto', {
-                          proyectoId: item.id,
-                          userId: userId,
-                        })
-                      }
-                      style={styles.cardContent}
-                    >
-                      <View style={styles.projectHeader}>
-                        <Text style={styles.projectName}>{item.nombre}</Text>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Icon name="event" size={16} color="#3A7BD5" />
-                          <Text style={styles.projectDueDate}>
-                            {new Date(item.fechaEntrega).toLocaleDateString()}
-                          </Text>
-                        </View>
-                      </View>
-
-                      <Text style={styles.projectDescription}>{item.descripcion}</Text>
-
-                      <View style={styles.progressContainer}>
-                        <View
-                          style={[
-                            styles.progressBar,
-                            { width: `${Math.max(0, Math.min(100, item.avance ?? 0))}%` },
-                          ]}
-                        />
-                        <Text style={styles.progressText}>{item.avance ?? 0}% completado</Text>
-                      </View>
-                    </TouchableOpacity>
-
-                    {/* BOTONES DE ACCIÓN */}
-                    <View style={styles.projectActions}>
-                      <TouchableOpacity style={styles.historyButton} onPress={() => handleVerHistorial(item)}>
-                        <Icon name="history" size={20} color="#FF9800" />
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={styles.editButton}
-                        onPress={() => {
-                          setProyectoAEditar(item);
-                          setNombre(item.nombre);
-                          setDescripcion(item.descripcion);
-                          setFechaEntrega(new Date(item.fechaEntrega));
-                          setEditModalVisible(true);
-                        }}
-                      >
-                        <Icon name="edit" size={20} color="#4CAF50" />
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={styles.actionButton}
-                        onPress={() => {
-                          setProyectoSeleccionado(item);
-                          obtenerMiembros();
-                          setModalAsignarVisible(true);
-                        }}
-                      >
-                        <Icon name="person-add" size={20} color="#3A7BD5" />
-                      </TouchableOpacity>
-
-                      <TouchableOpacity style={styles.membersButton} onPress={() => verMiembrosAsignados(item)}>
-                        <Icon name="people" size={20} color="#3A7BD5" />
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={styles.deleteButton}
-                        onPress={() => {
-                          setProyectoAEliminar(item.id);
-                          setModalVisible(true);
-                        }}
-                      >
-                        <Icon name="delete" size={20} color="#e53935" />
-                      </TouchableOpacity>
-                    </View>
+              <View style={styles.menuItems}>
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => handleMenuAction('notifications')}
+                >
+                  <View style={styles.menuItemLeft}>
+                    <Icon name="notifications" size={22} color="#FFFFFF" />
+                    <Text style={styles.menuItemText}>Notificaciones</Text>
                   </View>
-                )}
-                ListEmptyComponent={
-                  <View style={styles.emptyContainer}>
-                    <Icon name="folder" size={50} color="#90A4AE" />
-                    <Text style={styles.emptyText}>No tienes proyectos aún</Text>
+                  {unreadNotifications > 0 && (
+                    <View style={styles.menuBadge}>
+                      <Text style={styles.menuBadgeText}>{unreadNotifications}</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => handleMenuAction('calendar')}
+                >
+                  <View style={styles.menuItemLeft}>
+                    <Icon name="calendar-today" size={22} color="#FFFFFF" />
+                    <Text style={styles.menuItemText}>Calendario</Text>
                   </View>
-                }
-                scrollEnabled={false}
-              />
-            )}
-          </View>
-        </ScrollView>
-
-        {/* Modal para asignar miembros */}
-        <Modal visible={modalAsignarVisible} transparent animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>Asignar Miembro</Text>
-
-              <View style={styles.searchContainer}>
-                <Icon name="search" size={20} color="#90A4AE" style={styles.searchIcon} />
-                <TextInput
-                  style={styles.searchInput}
-                  placeholder="Buscar miembros..."
-                  placeholderTextColor="#90A4AE"
-                  value={searchText}
-                  onChangeText={setSearchText}
-                />
-              </View>
-
-              <ScrollView style={styles.modalScroll}>
-                {miembrosFiltrados.map((miembro) => (
-                  <TouchableOpacity
-                    key={miembro.id}
-                    onPress={() => setMiembroSeleccionado(miembro.id)}
-                    style={[styles.memberItem, miembroSeleccionado === miembro.id && styles.selectedMember]}
-                  >
-                    <View style={styles.memberAvatar}>
-                      <Icon name="person" size={24} color="#FFF" />
-                    </View>
-                    <View style={styles.memberInfo}>
-                      <Text style={styles.memberName}>{miembro.nombre}</Text>
-                      <Text style={styles.memberUsername}>@{miembro.username}</Text>
-                    </View>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-
-              <View style={styles.modalActions}>
-                <TouchableOpacity
-                  style={styles.cancelButton}
-                  onPress={() => {
-                    setModalAsignarVisible(false);
-                    setSearchText('');
-                    setMiembroSeleccionado(null);
-                  }}
-                >
-                  <Text style={styles.cancelButtonText}>Cancelar</Text>
                 </TouchableOpacity>
+
+                <View style={styles.menuDivider} />
 
                 <TouchableOpacity
-                  style={styles.confirmButton}
-                  onPress={asignarMiembro}
-                  disabled={!miembroSeleccionado || loading}
+                  style={styles.menuItem}
+                  onPress={() => handleMenuAction('logout')}
                 >
-                  <LinearGradient
-                    colors={['#3A7BD5', '#00D2FF']}
-                    style={styles.gradientButton}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                  >
-                    <Text style={styles.confirmButtonText}>{loading ? 'Asignando...' : 'Asignar'}</Text>
-                  </LinearGradient>
+                  <View style={styles.menuItemLeft}>
+                    <Icon name="exit-to-app" size={22} color="#FF6B6B" />
+                    <Text style={[styles.menuItemText, { color: '#FF6B6B' }]}>
+                      Cerrar Sesión
+                    </Text>
+                  </View>
                 </TouchableOpacity>
               </View>
-            </View>
-          </View>
-        </Modal>
 
-        {/* Modal para mostrar miembros asignados */}
-        <Modal visible={showMembersModal} transparent animationType="fade" onRequestClose={() => setShowMembersModal(false)}>
-          <View style={styles.modalOverlay}>
-            <View style={styles.customAlertContainer}>
-              <Text style={styles.customAlertTitle}>{modalTitle}</Text>
-
-              <ScrollView style={styles.customAlertScroll}>
-                {membersList.length > 0 && typeof membersList[0] === 'object' ? (
-                  membersList.map((miembro) => (
-                    <View key={miembro.id} style={styles.memberListItem}>
-                      <View style={styles.memberBullet}>
-                        <Icon name="person" size={16} color="#3A7BD5" />
-                      </View>
-                      <Text style={styles.memberListText}>
-                        {miembro.nombre} (@{miembro.username})
-                      </Text>
-                      <TouchableOpacity
-                        style={styles.removeMemberButton}
-                        onPress={() => {
-                          setSelectedMemberToRemove(miembro);
-                          setShowRemoveMemberModal(true);
-                          setShowMembersModal(false);
-                        }}
-                      >
-                        <Icon name="remove-circle" size={20} color="#e53935" />
-                      </TouchableOpacity>
-                    </View>
-                  ))
-                ) : (
-                  <Text style={styles.memberListText}>{membersList[0]}</Text>
-                )}
-              </ScrollView>
-
-              <TouchableOpacity style={styles.customAlertButton} onPress={() => setShowMembersModal(false)}>
-                <Text style={styles.customAlertButtonText}>Cerrar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Modal para confirmar eliminación de miembro */}
-        <Modal visible={showRemoveMemberModal} transparent animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>Eliminar Miembro</Text>
-              <Text style={styles.deleteMessage}>
-                ¿Estás seguro de que quieres eliminar a {selectedMemberToRemove?.nombre} del proyecto?
-              </Text>
-
-              <View style={styles.modalActions}>
-                <TouchableOpacity
-                  style={styles.cancelButton}
-                  onPress={() => {
-                    setShowRemoveMemberModal(false);
-                    setSelectedMemberToRemove(null);
-                  }}
-                >
-                  <Text style={styles.cancelButtonText}>Cancelar</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.confirmButton} onPress={eliminarMiembro} disabled={loading}>
-                  <LinearGradient colors={['#FF5252', '#FF1744']} style={styles.gradientButton} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
-                    <Text style={styles.confirmButtonText}>{loading ? 'Eliminando...' : 'Eliminar'}</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
+              <View style={styles.menuFooter}>
+                <Text style={styles.menuFooterText}></Text>
               </View>
-            </View>
-          </View>
-        </Modal>
+            </LinearGradient>
+          </Animated.View>
+        </TouchableOpacity>
+      )}
 
-        {/* Modal para eliminar proyecto */}
-        <Modal visible={modalVisible} transparent animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>Confirmar Eliminación</Text>
-              <Text style={styles.deleteMessage}>¿Estás seguro que deseas eliminar este proyecto?</Text>
+      <LinearGradient colors={['#3A7BD5', '#00D2FF']} style={styles.background}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.container}
+        >
+          <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
-              <TextInput
-                style={styles.passwordInput}
-                placeholder="Ingresa tu contraseña para confirmar"
-                placeholderTextColor="#90A4AE"
-                secureTextEntry
-                value={password}
-                onChangeText={setPassword}
-              />
-
-              <View style={styles.modalActions}>
-                <TouchableOpacity
-                  style={styles.cancelButton}
-                  onPress={() => {
-                    setModalVisible(false);
-                    setPassword('');
-                  }}
-                >
-                  <Text style={styles.cancelButtonText}>Cancelar</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.confirmButton} onPress={eliminarProyecto} disabled={loading}>
-                  <LinearGradient colors={['#FF5252', '#FF1744']} style={styles.gradientButton} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
-                    <Text style={styles.confirmButtonText}>{loading ? 'Eliminando...' : 'Eliminar'}</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Modal para editar proyecto */}
-        <Modal visible={editModalVisible} transparent animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>Editar Proyecto</Text>
+            {/* FORMULARIO DE CREACIÓN */}
+            <View style={styles.creationContainer}>
+              <Text style={styles.sectionTitle}>Crear Nuevo Proyecto</Text>
 
               <TextInput
                 style={styles.input}
@@ -712,23 +571,25 @@ const HomeGerente = ({ route, navigation }) => {
                 returnKeyType="done"
                 blurOnSubmit
                 onSubmitEditing={() => {
-                  if (nombre.trim() && descripcion.trim()) editarProyecto();
+                  if (nombre.trim() && descripcion.trim()) crearProyecto();
                 }}
               />
 
-              <TouchableOpacity style={styles.dateButton} onPress={() => setShowEditDatePicker(true)}>
+              <TouchableOpacity style={styles.dateButton} onPress={() => setShowCreateDatePicker(true)}>
                 <Icon name="event" size={20} color="#3A7BD5" />
-                <Text style={styles.dateButtonText}>{fechaEntrega.toLocaleDateString()}</Text>
+                <Text style={styles.dateButtonText}>
+                  {fechaEntrega.toLocaleDateString() || 'Seleccionar fecha'}
+                </Text>
               </TouchableOpacity>
 
-              {showEditDatePicker && (
+              {showCreateDatePicker && (
                 <DateTimePicker
                   value={fechaEntrega}
                   mode="date"
                   display="default"
                   minimumDate={hoy}
                   onChange={(event, selectedDate) => {
-                    setShowEditDatePicker(false);
+                    setShowCreateDatePicker(false);
                     if (selectedDate) {
                       const d = new Date(selectedDate);
                       d.setHours(0, 0, 0, 0);
@@ -743,24 +604,437 @@ const HomeGerente = ({ route, navigation }) => {
                 />
               )}
 
-              <View style={styles.modalActions}>
-                <TouchableOpacity style={styles.cancelButton} onPress={() => setEditModalVisible(false)}>
-                  <Text style={styles.cancelButtonText}>Cancelar</Text>
-                </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.createButton}
+                onPress={crearProyecto}
+                disabled={!nombre.trim() || !descripcion.trim()}
+              >
+                <Text style={styles.createButtonText}>Crear Proyecto</Text>
+              </TouchableOpacity>
+            </View>
 
-                <TouchableOpacity style={styles.confirmButton} onPress={editarProyecto} disabled={loading}>
-                  <LinearGradient colors={['#4CAF50', '#2E7D32']} style={styles.gradientButton}>
-                    <Text style={styles.confirmButtonText}>{loading ? 'Guardando...' : 'Guardar Cambios'}</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
+            {/* LISTA DE PROYECTOS */}
+            <View style={styles.projectsContainer}>
+              <Text style={styles.projectsTitle}>Mis Proyectos</Text>
+
+              {loading ? (
+                <ActivityIndicator size="large" color="#3A7BD5" style={styles.loader} />
+              ) : (
+                <FlatList
+                  data={proyectos}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <View style={styles.projectCard}>
+                      <TouchableOpacity
+                        onPress={() =>
+                          navigation.navigate('TareasProyecto', {
+                            proyectoId: item.id,
+                            userId: userId,
+                          })
+                        }
+                        style={styles.cardContent}
+                      >
+                        <View style={styles.projectHeader}>
+                          <Text style={styles.projectName}>{item.nombre}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Icon name="event" size={16} color="#3A7BD5" />
+                            <Text style={styles.projectDueDate}>
+                              {new Date(item.fechaEntrega).toLocaleDateString()}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <Text style={styles.projectDescription}>{item.descripcion}</Text>
+
+                        <View style={styles.progressContainer}>
+                          <View
+                            style={[
+                              styles.progressBar,
+                              { width: `${Math.max(0, Math.min(100, item.avance ?? 0))}%` },
+                            ]}
+                          />
+                          <Text style={styles.progressText}>{item.avance ?? 0}% completado</Text>
+                        </View>
+                      </TouchableOpacity>
+
+                      {/* BOTONES DE ACCIÓN */}
+                      <View style={styles.projectActions}>
+                        <TouchableOpacity style={styles.historyButton} onPress={() => handleVerHistorial(item)}>
+                          <Icon name="history" size={20} color="#FF9800" />
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={styles.editButton}
+                          onPress={() => {
+                            setProyectoAEditar(item);
+                            setNombre(item.nombre);
+                            setDescripcion(item.descripcion);
+                            setFechaEntrega(new Date(item.fechaEntrega));
+                            setEditModalVisible(true);
+                          }}
+                        >
+                          <Icon name="edit" size={20} color="#4CAF50" />
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={styles.actionButton}
+                          onPress={() => {
+                            setProyectoSeleccionado(item);
+                            obtenerMiembros();
+                            setModalAsignarVisible(true);
+                          }}
+                        >
+                          <Icon name="person-add" size={20} color="#3A7BD5" />
+                        </TouchableOpacity>
+
+                        <TouchableOpacity style={styles.membersButton} onPress={() => verMiembrosAsignados(item)}>
+                          <Icon name="people" size={20} color="#3A7BD5" />
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={styles.deleteButton}
+                          onPress={() => {
+                            setProyectoAEliminar(item.id);
+                            setModalVisible(true);
+                          }}
+                        >
+                          <Icon name="delete" size={20} color="#e53935" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+                  ListEmptyComponent={
+                    <View style={styles.emptyContainer}>
+                      <Icon name="folder" size={50} color="#90A4AE" />
+                      <Text style={styles.emptyText}>No tienes proyectos aún</Text>
+                    </View>
+                  }
+                  scrollEnabled={false}
+                />
+              )}
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </LinearGradient>
+
+      {/* NOTIFICACIÓN FLOTANTE */}
+      {showFloatingNotification && (
+        <Animated.View
+          style={[
+            styles.floatingNotification,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: floatingNotifAnim }]
+            }
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.floatingNotificationContent}
+            onPress={handleNotificationPress}
+            activeOpacity={0.9}
+          >
+            {/* Fondo con gradiente y efecto de brillo */}
+            <LinearGradient
+              colors={['#7C4DFF', '#448AFF']}
+              style={styles.floatingNotificationGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              {/* Efecto de brillo sutil */}
+              <View style={styles.glowEffect} />
+
+              {/* Contenido de la notificación */}
+              <View style={styles.notificationContent}>
+
+                {/* Icono con efecto neomórfico */}
+                <View style={styles.iconContainer}>
+                  <View style={styles.iconBackground}>
+                    <Icon name="notifications" size={24} color="#7C4DFF" />
+                  </View>
+                  {unreadNotifications > 0 && (
+                    <View style={styles.floatingNotificationBadge}>
+                      <Text style={styles.floatingNotificationBadgeText}>
+                        {unreadNotifications}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Texto de la notificación */}
+                <View style={styles.floatingNotificationTextContainer}>
+                  <Text style={styles.floatingNotificationTitle} numberOfLines={1}>
+                    {unreadNotifications === 1 ? '¡Nueva notificación!' : `Tienes ${unreadNotifications} nuevas notificaciones`}
+                  </Text>
+
+                  <View style={styles.notificationDivider} />
+
+                  <View style={styles.subtitleContainer}>
+                    <Icon name="touch-app" size={16} color="rgba(255,255,255,0.9)" />
+                    <Text style={styles.floatingNotificationSubtitle}>
+                      Toca para ver detalles
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Flecha con contenedor circular */}
+                <View style={styles.arrowContainer}>
+                  <View style={styles.arrowCircle}>
+                    <Icon name="arrow-forward" size={20} color="#7C4DFF" />
+                  </View>
+                </View>
               </View>
+            </LinearGradient>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+
+      {/* Modal para asignar miembros */}
+      <Modal visible={modalAsignarVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Asignar Miembro</Text>
+
+            <View style={styles.searchContainer}>
+              <Icon name="search" size={20} color="#90A4AE" style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Buscar miembros..."
+                placeholderTextColor="#90A4AE"
+                value={searchText}
+                onChangeText={setSearchText}
+              />
+            </View>
+
+            <ScrollView style={styles.modalScroll}>
+              {miembrosFiltrados.map((miembro) => (
+                <TouchableOpacity
+                  key={miembro.id}
+                  onPress={() => setMiembroSeleccionado(miembro.id)}
+                  style={[styles.memberItem, miembroSeleccionado === miembro.id && styles.selectedMember]}
+                >
+                  <View style={styles.memberAvatar}>
+                    <Icon name="person" size={24} color="#FFF" />
+                  </View>
+                  <View style={styles.memberInfo}>
+                    <Text style={styles.memberName}>{miembro.nombre}</Text>
+                    <Text style={styles.memberUsername}>@{miembro.username}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => {
+                  setModalAsignarVisible(false);
+                  setSearchText('');
+                  setMiembroSeleccionado(null);
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.confirmButton}
+                onPress={asignarMiembro}
+                disabled={!miembroSeleccionado || loading}
+              >
+                <LinearGradient
+                  colors={['#3A7BD5', '#00D2FF']}
+                  style={styles.gradientButton}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                >
+                  <Text style={styles.confirmButtonText}>{loading ? 'Asignando...' : 'Asignar'}</Text>
+                </LinearGradient>
+              </TouchableOpacity>
             </View>
           </View>
-        </Modal>
-      </KeyboardAvoidingView>
-    </LinearGradient>
+        </View>
+      </Modal>
+
+      {/* Modal para mostrar miembros asignados */}
+      <Modal visible={showMembersModal} transparent animationType="fade" onRequestClose={() => setShowMembersModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.customAlertContainer}>
+            <Text style={styles.customAlertTitle}>{modalTitle}</Text>
+
+            <ScrollView style={styles.customAlertScroll}>
+              {membersList.length > 0 && typeof membersList[0] === 'object' ? (
+                membersList.map((miembro) => (
+                  <View key={miembro.id} style={styles.memberListItem}>
+                    <View style={styles.memberBullet}>
+                      <Icon name="person" size={16} color="#3A7BD5" />
+                    </View>
+                    <Text style={styles.memberListText}>
+                      {miembro.nombre} (@{miembro.username})
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.removeMemberButton}
+                      onPress={() => {
+                        setSelectedMemberToRemove(miembro);
+                        setShowRemoveMemberModal(true);
+                        setShowMembersModal(false);
+                      }}
+                    >
+                      <Icon name="remove-circle" size={20} color="#e53935" />
+                    </TouchableOpacity>
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.memberListText}>{membersList[0]}</Text>
+              )}
+            </ScrollView>
+
+            <TouchableOpacity style={styles.customAlertButton} onPress={() => setShowMembersModal(false)}>
+              <Text style={styles.customAlertButtonText}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal para confirmar eliminación de miembro */}
+      <Modal visible={showRemoveMemberModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Eliminar Miembro</Text>
+            <Text style={styles.deleteMessage}>
+              ¿Estás seguro de que quieres eliminar a {selectedMemberToRemove?.nombre} del proyecto?
+            </Text>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => {
+                  setShowRemoveMemberModal(false);
+                  setSelectedMemberToRemove(null);
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.confirmButton} onPress={eliminarMiembro} disabled={loading}>
+                <LinearGradient colors={['#FF5252', '#FF1744']} style={styles.gradientButton} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+                  <Text style={styles.confirmButtonText}>{loading ? 'Eliminando...' : 'Eliminar'}</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal para eliminar proyecto */}
+      <Modal visible={modalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Confirmar Eliminación</Text>
+            <Text style={styles.deleteMessage}>¿Estás seguro que deseas eliminar este proyecto?</Text>
+
+            <TextInput
+              style={styles.passwordInput}
+              placeholder="Ingresa tu contraseña para confirmar"
+              placeholderTextColor="#90A4AE"
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => {
+                  setModalVisible(false);
+                  setPassword('');
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.confirmButton} onPress={eliminarProyecto} disabled={loading}>
+                <LinearGradient colors={['#FF5252', '#FF1744']} style={styles.gradientButton} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+                  <Text style={styles.confirmButtonText}>{loading ? 'Eliminando...' : 'Eliminar'}</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal para editar proyecto */}
+      <Modal visible={editModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Editar Proyecto</Text>
+
+            <TextInput
+              style={styles.input}
+              placeholder="Nombre del proyecto *"
+              value={nombre}
+              onChangeText={setNombre}
+              returnKeyType="next"
+              onSubmitEditing={() => descripcionRef?.current?.focus()}
+            />
+
+            <TextInput
+              ref={descripcionRef}
+              style={[styles.input, styles.multilineInput]}
+              placeholder="Descripción *"
+              multiline
+              value={descripcion}
+              onChangeText={setDescripcion}
+              returnKeyType="done"
+              blurOnSubmit
+              onSubmitEditing={() => {
+                if (nombre.trim() && descripcion.trim()) editarProyecto();
+              }}
+            />
+
+            <TouchableOpacity style={styles.dateButton} onPress={() => setShowEditDatePicker(true)}>
+              <Icon name="event" size={20} color="#3A7BD5" />
+              <Text style={styles.dateButtonText}>{fechaEntrega.toLocaleDateString()}</Text>
+            </TouchableOpacity>
+
+            {showEditDatePicker && (
+              <DateTimePicker
+                value={fechaEntrega}
+                mode="date"
+                display="default"
+                minimumDate={hoy}
+                onChange={(event, selectedDate) => {
+                  setShowEditDatePicker(false);
+                  if (selectedDate) {
+                    const d = new Date(selectedDate);
+                    d.setHours(0, 0, 0, 0);
+                    if (d < hoy) {
+                      Alert.alert('Fecha inválida', 'Seleccione una fecha a partir de hoy.');
+                      setFechaEntrega(hoy);
+                    } else {
+                      setFechaEntrega(selectedDate);
+                    }
+                  }
+                }}
+              />
+            )}
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setEditModalVisible(false)}>
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.confirmButton} onPress={editarProyecto} disabled={loading}>
+                <LinearGradient colors={['#4CAF50', '#2E7D32']} style={styles.gradientButton}>
+                  <Text style={styles.confirmButtonText}>{loading ? 'Guardando...' : 'Guardar Cambios'}</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
   );
 };
+
 
 const styles = StyleSheet.create({
   container: {
@@ -769,9 +1043,6 @@ const styles = StyleSheet.create({
   },
   background: {
     flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 16,
   },
   header: {
     flexDirection: 'row',
@@ -782,38 +1053,141 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
-    shadowColor: '#3A7BD5',
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 5,
-    marginBottom: 4,
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 1000,
   },
-  backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  menuButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 12,
   },
   headerTitle: {
     fontSize: 20,
     fontWeight: '700',
     color: '#FFFFFF',
-    textAlign: 'center',
-    flex: 1,
-    textShadowColor: 'rgba(0, 0, 0, 0.1)',
+    textShadowColor: 'rgba(0, 0, 0, 0.2)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
   refreshButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  menuOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    zIndex: 2000,
+  },
+  menuContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    bottom: 0,
+    width: width * 0.75,
+    zIndex: 2001,
+  },
+  menuGradient: {
+    flex: 1,
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
+  },
+  menuHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  menuTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  closeMenuButton: {
+    padding: 4,
+  },
+  menuItems: {
+    padding: 20,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    marginBottom: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  menuItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  menuItemText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginLeft: 12,
+  },
+  menuBadge: {
+    backgroundColor: '#FF5252',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    marginVertical: 16,
+  },
+  menuFooter: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    right: 20,
+    alignItems: 'center',
+  },
+  menuFooterText: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginBottom: 4,
+  },
+  scrollContent: {
+    paddingBottom: 16,
   },
   creationContainer: {
     backgroundColor: 'white',
@@ -1183,6 +1557,123 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     textAlign: 'center',
     lineHeight: 20,
+  },
+  floatingNotificationContent: {
+    width: '100%',
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#7C4DFF',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 15,
+    elevation: 10,
+  },
+  floatingNotificationGradient: {
+    padding: 20,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  glowEffect: {
+    position: 'absolute',
+    top: -50,
+    right: -50,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  notificationContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  iconContainer: {
+    position: 'relative',
+    marginRight: 15,
+  },
+  iconBackground: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 5,
+  },
+  floatingNotificationBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: '#FF5252',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 4,
+  },
+  floatingNotificationBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  floatingNotificationTextContainer: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  floatingNotificationTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 6,
+    textShadowColor: 'rgba(0, 0, 0, 0.2)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+    letterSpacing: 0.5,
+  },
+  notificationDivider: {
+    height: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.4)',
+    marginVertical: 8,
+    width: '25%',
+    borderRadius: 1,
+  },
+  subtitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  floatingNotificationSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.9)',
+    marginLeft: 6,
+    fontWeight: '500',
+    letterSpacing: 0.3,
+  },
+  arrowContainer: {
+    marginLeft: 10,
+  },
+  arrowCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
   },
 });
 
