@@ -197,33 +197,44 @@ const TareasProyecto = ({ route, navigation }) => {
   };
 
   const obtenerMiembrosProyecto = async () => {
-    try {
-      setLoading(true);
-      const proyectoRef = doc(db, 'proyectos', proyectoId);
-      const proyectoSnap = await getDoc(proyectoRef);
+  try {
+    setLoading(true);
+    const proyectoRef = doc(db, 'proyectos', proyectoId);
+    const proyectoSnap = await getDoc(proyectoRef);
 
-      if (proyectoSnap.exists()) {
-        const proyectoData = proyectoSnap.data();
-        const miembrosProyecto = proyectoData.miembros || [];
+    if (proyectoSnap.exists()) {
+      const proyectoData = proyectoSnap.data();
+      let miembrosProyecto = proyectoData.miembros || [];
 
-        if (miembrosProyecto.length === 0) {
-          setMiembrosDisponibles([]);
-          return;
-        }
+      // Filtrar valores nulos, undefined o strings vacíos
+      let miembrosValidos = miembrosProyecto.filter(miembroId => 
+        miembroId && miembroId.trim() !== ''
+      );
 
-        // Ojo: IN soporta máx. 10 IDs. Si hay más, trocear en lotes.
-        const q = query(collection(db, 'usuarios'), where('__name__', 'in', miembrosProyecto.slice(0, 10)));
-        const querySnapshot = await getDocs(q);
-        const miembros = querySnapshot.docs.map(docu => ({ id: docu.id, ...docu.data() }));
-        setMiembrosDisponibles(miembros);
+      if (miembrosValidos.length === 0) {
+        setMiembrosDisponibles([]);
+        return;
       }
-    } catch (error) {
-      console.error("Error al obtener miembros del proyecto:", error);
-      Alert.alert('Error', 'No se pudieron cargar los miembros');
-    } finally {
-      setLoading(false);
+
+      // La consulta IN de Firestore tiene un límite de 10 elementos
+      // Si tienes más de 10 miembros, necesitarás hacer consultas por lotes
+      if (miembrosValidos.length > 10) {
+        console.warn("Demasiados miembros para consultar a la vez. Solo se consultarán los primeros 10.");
+        miembrosValidos = miembrosValidos.slice(0, 10);
+      }
+
+      const q = query(collection(db, 'usuarios'), where('__name__', 'in', miembrosValidos));
+      const querySnapshot = await getDocs(q);
+      const miembros = querySnapshot.docs.map(docu => ({ id: docu.id, ...docu.data() }));
+      setMiembrosDisponibles(miembros);
     }
-  };
+  } catch (error) {
+    console.error("Error al obtener miembros del proyecto:", error);
+    Alert.alert('Error', 'No se pudieron cargar los miembros');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const asignarMiembro = async () => {
     if (!miembroSeleccionado || !tareaSeleccionada) {

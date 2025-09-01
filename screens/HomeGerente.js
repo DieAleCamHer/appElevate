@@ -374,7 +374,9 @@ const HomeGerente = ({ route, navigation }) => {
   };
 
   const verMiembrosAsignados = async (proyecto) => {
-    if (!proyecto.miembros || proyecto.miembros.length === 0) {
+    const miembros = Array.isArray(proyecto?.miembros) ? proyecto.miembros : [];
+
+    if (miembros.length === 0) {
       setModalTitle('Miembros Asignados');
       setMembersList(['No hay miembros asignados']);
       setProyectoSeleccionado(proyecto);
@@ -385,21 +387,26 @@ const HomeGerente = ({ route, navigation }) => {
     try {
       setLoading(true);
       const miembrosConInfo = [];
-      for (const id of proyecto.miembros) {
-        const docRef = doc(db, 'usuarios', id);
+
+      for (const raw of miembros) {
+        // Acepta string o objeto con { id }
+        const id = typeof raw === 'string' ? raw : raw?.id;
+        if (!id) continue; // evita null/undefined
+
+        const docRef = doc(db, 'usuarios', String(id));
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
-          const data = docSnap.data();
+          const data = docSnap.data() || {};
           miembrosConInfo.push({
             id,
-            nombre: data.nombre,
-            username: data.username,
+            nombre: data?.nombre ?? '(sin nombre)',
+            username: data?.username ?? '(sin usuario)',
           });
         }
       }
 
       setModalTitle('Miembros Asignados');
-      setMembersList(miembrosConInfo);
+      setMembersList(miembrosConInfo.length ? miembrosConInfo : ['No hay miembros asignados']);
       setProyectoSeleccionado(proyecto);
       setShowMembersModal(true);
     } catch (error) {
@@ -411,6 +418,7 @@ const HomeGerente = ({ route, navigation }) => {
       setLoading(false);
     }
   };
+
 
   const editarProyecto = async () => {
     if (!proyectoAEditar || !nombre.trim() || !descripcion.trim()) {
