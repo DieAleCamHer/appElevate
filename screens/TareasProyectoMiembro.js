@@ -63,12 +63,12 @@ const TareasProyectoMiembro = ({ route, navigation }) => {
   const renderTaskCard = ({ item }) => (
     <TouchableOpacity
       style={styles.taskCard}
-      onPress={() => navigation.navigate('SubtareasMiembro', {
-        tareaId: item.id,
-        userId,
-        proyectoId,
-      })}
+      onPress={() => {
+        console.log('[NAV] -> SubtareasMiembro', { tareaId: item.id, userId, proyectoId });
+        navigation.navigate('SubtareasMiembro', { tareaId: item.id, userId, proyectoId });
+      }}
     >
+
       <View style={styles.taskHeader}>
         <View style={styles.iconContainer}>
           <MaterialIcons name="assignment" size={18} color="#3A7BD5" />

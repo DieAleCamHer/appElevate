@@ -2,22 +2,42 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, Alert, StyleSheet,
   Image, Animated, KeyboardAvoidingView, Platform, StatusBar,
-  Keyboard, TouchableWithoutFeedback
+  Keyboard, TouchableWithoutFeedback, Dimensions
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { auth, db } from '../firebaseConfig';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 
+const { width, height } = Dimensions.get('window');
+
+// Puntos de referencia para responsive design
+const guidelineBaseWidth = 375;
+const guidelineBaseHeight = 812;
+
+// Funciones para escalar proporcionalmente
+const scale = size => width / guidelineBaseWidth * size;
+const verticalScale = size => height / guidelineBaseHeight * size;
+const moderateScale = (size, factor = 0.5) => size + (scale(size) - size) * factor;
+
+// Función para detectar orientación
+const isPortrait = () => height >= width;
+
 const LoginScreen = ({ navigation }) => {
   const [form, setForm] = useState({ username: '', password: '' });
   const [isLoading, setIsLoading] = useState(false);
   const [activeField, setActiveField] = useState(null);
+  const [orientation, setOrientation] = useState(isPortrait() ? 'portrait' : 'landscape');
 
   const passwordRef = useRef(null);
-  const fadeAnim = useRef(new Animated.Value(1)).current; // Iniciar en 1 para evitar parpadeo
+  const fadeAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
+    // Listener para cambios de orientación
+    const dimensionHandler = Dimensions.addEventListener('change', () => {
+      setOrientation(isPortrait() ? 'portrait' : 'landscape');
+    });
+
     // Limpiar formulario cuando la pantalla recibe foco
     const unsubscribe = navigation.addListener('focus', () => {
       setForm({ username: '', password: '' });
@@ -26,7 +46,10 @@ const LoginScreen = ({ navigation }) => {
       Keyboard.dismiss();
     });
 
-    return unsubscribe;
+    return () => {
+      dimensionHandler?.remove();
+      unsubscribe();
+    };
   }, [navigation]);
 
   const handleChange = (name, value) => {
@@ -34,7 +57,7 @@ const LoginScreen = ({ navigation }) => {
   };
 
   const handleLogin = async () => {
-    if (isLoading) return; // Prevenir múltiples clics
+    if (isLoading) return;
     
     if (!form.username || !form.password) {
       Alert.alert('Error', 'Por favor completa todos los campos');
@@ -45,7 +68,7 @@ const LoginScreen = ({ navigation }) => {
 
     try {
       setIsLoading(true);
-      Keyboard.dismiss(); // Ocultar teclado al iniciar sesión
+      Keyboard.dismiss();
       
       const cred = await signInWithEmailAndPassword(auth, email, form.password);
       const userId = cred.user.uid;
@@ -97,11 +120,18 @@ const LoginScreen = ({ navigation }) => {
         
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.container}
+          style={[styles.container, orientation === 'landscape' && styles.landscapeContainer]}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
         >
-          <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
-            <View style={styles.logoContainer}>
+          <Animated.View style={[
+            styles.content, 
+            { opacity: fadeAnim },
+            orientation === 'landscape' && styles.landscapeContent
+          ]}>
+            <View style={[
+              styles.logoContainer, 
+              orientation === 'landscape' && styles.landscapeLogoContainer
+            ]}>
               <Image 
                 source={require('../assets/logo.png')} 
                 style={styles.logo} 
@@ -109,7 +139,10 @@ const LoginScreen = ({ navigation }) => {
               />
             </View>
 
-            <View style={styles.formContainer}>
+            <View style={[
+              styles.formContainer, 
+              orientation === 'landscape' && styles.landscapeFormContainer
+            ]}>
               <Text style={styles.title}>Inicio de Sesión</Text>
               
               {/* Campo de Usuario */}
@@ -185,77 +218,99 @@ const LoginScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   background: {
     flex: 1,
+    width: '100%',
+    height: '100%',
   },
   container: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: moderateScale(24),
+  },
+  landscapeContainer: {
+    paddingHorizontal: moderateScale(12),
   },
   content: {
-    paddingHorizontal: 16,
+    paddingHorizontal: moderateScale(16),
+  },
+  landscapeContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: verticalScale(30),
+  },
+  landscapeLogoContainer: {
+    flex: 1,
+    marginRight: moderateScale(20),
+    marginBottom: 0,
   },
   logo: {
-    width: 120,
-    height: 120,
+    width: moderateScale(120),
+    height: moderateScale(120),
     tintColor: '#00796B',
+    resizeMode: 'contain',
   },
   formContainer: {
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 20,
-    padding: 24,
+    borderRadius: moderateScale(20),
+    padding: moderateScale(24),
     shadowColor: '#00796B',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: verticalScale(4) },
     shadowOpacity: 0.15,
-    shadowRadius: 12,
+    shadowRadius: moderateScale(12),
     elevation: 5,
+    marginHorizontal: width < 350 ? moderateScale(10) : 0,
+  },
+  landscapeFormContainer: {
+    flex: 2,
   },
   title: {
-    fontSize: 24,
+    fontSize: moderateScale(24),
     fontWeight: '700',
     color: '#00796B',
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: verticalScale(24),
+    ...(width < 350 && { fontSize: moderateScale(20) }),
   },
   inputContainer: {
-    marginBottom: 20,
+    marginBottom: verticalScale(20),
   },
   inputLabel: {
-    fontSize: 15,
+    fontSize: moderateScale(15),
     color: '#00838F',
-    marginBottom: 8,
+    marginBottom: verticalScale(8),
     fontWeight: '600',
   },
   input: {
-    height: 46,
-    fontSize: 16,
+    height: verticalScale(46),
+    fontSize: moderateScale(16),
     color: '#263238',
     fontWeight: '500',
-    paddingBottom: 8,
+    paddingBottom: verticalScale(8),
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   inputLine: {
-    height: 1.5,
+    height: Platform.select({ ios: 1, android: 1.5 }),
     backgroundColor: '#E0F2F1',
   },
   inputLineActive: {
     backgroundColor: '#00796B',
-    height: 2,
+    height: Platform.select({ ios: 2, android: 2 }),
   },
   button: {
-    borderRadius: 12,
+    borderRadius: moderateScale(12),
     overflow: 'hidden',
-    marginTop: 24,
+    marginTop: verticalScale(24),
     shadowColor: '#00796B',
-    shadowOffset: { width: 0, height: 3 },
+    shadowOffset: { width: 0, height: verticalScale(3) },
     shadowOpacity: 0.25,
-    shadowRadius: 6,
+    shadowRadius: moderateScale(6),
     elevation: 5,
   },
   buttonGradient: {
-    paddingVertical: 16,
+    paddingVertical: verticalScale(16),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -264,9 +319,9 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: moderateScale(16),
     fontWeight: '700',
-    letterSpacing: 0.5,
+    letterSpacing: moderateScale(0.5),
   },
 });
 

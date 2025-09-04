@@ -1,810 +1,637 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-    View,
-    Text,
-    FlatList,
-    TouchableOpacity,
-    StyleSheet,
-    ActivityIndicator,
-    StatusBar,
-    RefreshControl,
-    Alert,
-    Modal
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  Modal,
+  StyleSheet,
+  Alert,
+  ActivityIndicator,
+  StatusBar
 } from 'react-native';
-import { db } from '../firebaseConfig';
-import { collection, query, where, getDocs, updateDoc, doc, deleteDoc } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
-import Icon from 'react-native-vector-icons/MaterialIcons';
+import { collection, query, where, getDocs, updateDoc, doc, deleteDoc, orderBy } from 'firebase/firestore';
+import { db, auth } from '../firebaseConfig';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Platform } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
 
 const Notificaciones = ({ navigation }) => {
-    const [notificaciones, setNotificaciones] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
-    const [selectedNotification, setSelectedNotification] = useState(null);
-    const [modalVisible, setModalVisible] = useState(false);
+  const [notificaciones, setNotificaciones] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedNotification, setSelectedNotification] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-    // Función para obtener notificaciones
-    const obtenerNotificaciones = async () => {
-        try {
-            setRefreshing(true);
-            const auth = getAuth();
-            const user = auth.currentUser;
+  // Obtener notificaciones del usuario actual
+  const obtenerNotificaciones = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
 
-            if (!user) {
-                console.log('Usuario no autenticado');
-                return;
-            }
+      const q = query(
+        collection(db, 'notificaciones'),
+        where('userId', '==', user.uid),
+        orderBy('date', 'desc')
+      );
+      
+      const querySnapshot = await getDocs(q);
+      const notifs = [];
+      
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        notifs.push({ 
+          id: doc.id, 
+          ...data,
+          // Asegurar que la fecha se convierta correctamente
+          date: data.date ? data.date.toDate() : new Date()
+        });
+      });
+      
+      setNotificaciones(notifs);
+    } catch (error) {
+      console.error('Error al obtener notificaciones:', error);
+      Alert.alert('Error', 'No se pudieron cargar las notificaciones');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
 
-            const q = query(
-                collection(db, 'notificaciones'),
-                where('userId', '==', user.uid)
-            );
+  // Marcar notificación como leída
+  const marcarComoLeida = async (notifId) => {
+    try {
+      await updateDoc(doc(db, 'notificaciones', notifId), {
+        seen: true
+      });
+      // Actualizar lista local
+      setNotificaciones(prev => 
+        prev.map(n => n.id === notifId ? {...n, seen: true} : n)
+      );
+    } catch (error) {
+      console.error('Error al marcar como leída:', error);
+    }
+  };
 
-            const snapshot = await getDocs(q);
-            const data = snapshot.docs.map((doc) => ({ 
-                id: doc.id, 
-                ...doc.data(),
-                // Asegurar que la fecha se maneje correctamente
-                date: doc.data().date ? doc.data().date.toDate() : new Date()
-            }));
-            
-            // Ordenar por fecha, las más recientes primero
-            data.sort((a, b) => b.date - a.date);
-            setNotificaciones(data);
-        } catch (error) {
-            console.error("Error al obtener notificaciones:", error);
-            Alert.alert("Error", "No se pudieron cargar las notificaciones");
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
-    };
+  // Marcar todas como leídas
+  const marcarTodasComoLeidas = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
 
-    // Función para marcar notificación como vista
-    const marcarComoVista = async (id) => {
-        try {
-            const notificacionRef = doc(db, 'notificaciones', id);
-            await updateDoc(notificacionRef, { seen: true });
+      const q = query(
+        collection(db, 'notificaciones'),
+        where('userId', '==', user.uid),
+        where('seen', '==', false)
+      );
+      
+      const querySnapshot = await getDocs(q);
+      const batch = [];
+      
+      querySnapshot.forEach((doc) => {
+        batch.push(updateDoc(doc.ref, { seen: true }));
+      });
+      
+      // Ejecutar todas las actualizaciones
+      await Promise.all(batch);
+      
+      // Actualizar estado local
+      setNotificaciones(prev => 
+        prev.map(n => ({ ...n, seen: true }))
+      );
+      
+      Alert.alert('Éxito', 'Todas las notificaciones se marcaron como leídas');
+    } catch (error) {
+      console.error('Error al marcar todas como leídas:', error);
+      Alert.alert('Error', 'No se pudieron marcar todas como leídas');
+    }
+  };
 
-            setNotificaciones(notificaciones.map((notif) =>
-                notif.id === id ? { ...notif, seen: true } : notif
-            ));
-        } catch (error) {
-            console.error("Error al marcar como vista:", error);
-            Alert.alert("Error", "No se pudo marcar como leída");
-        }
-    };
+  // Eliminar notificación
+  const eliminarNotificacion = async (notifId) => {
+    try {
+      await deleteDoc(doc(db, 'notificaciones', notifId));
+      setNotificaciones(prev => prev.filter(n => n.id !== notifId));
+      setModalVisible(false);
+      Alert.alert('Éxito', 'Notificación eliminada');
+    } catch (error) {
+      console.error('Error al eliminar notificación:', error);
+      Alert.alert('Error', 'No se pudo eliminar la notificación');
+    }
+  };
 
-    // Función para eliminar notificación
-    const eliminarNotificacion = async (id) => {
-        try {
-            await deleteDoc(doc(db, 'notificaciones', id));
-            setNotificaciones(notificaciones.filter(notif => notif.id !== id));
-            setModalVisible(false);
-            Alert.alert("Éxito", "Notificación eliminada");
-        } catch (error) {
-            console.error("Error al eliminar notificación:", error);
-            Alert.alert("Error", "No se pudo eliminar la notificación");
-        }
-    };
+  // Eliminar todas las notificaciones
+  const eliminarTodas = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
 
-    // Función para marcar todas como vistas
-    const marcarTodasComoVistas = async () => {
-        try {
-            const promises = notificaciones
-                .filter(notif => !notif.seen)
-                .map(notif => updateDoc(doc(db, 'notificaciones', notif.id), { seen: true }));
+      const q = query(
+        collection(db, 'notificaciones'),
+        where('userId', '==', user.uid)
+      );
+      
+      const querySnapshot = await getDocs(q);
+      const batch = [];
+      
+      querySnapshot.forEach((doc) => {
+        batch.push(deleteDoc(doc.ref));
+      });
+      
+      // Ejecutar todas las eliminaciones
+      await Promise.all(batch);
+      
+      // Actualizar estado local
+      setNotificaciones([]);
+      
+      Alert.alert('Éxito', 'Todas las notificaciones fueron eliminadas');
+    } catch (error) {
+      console.error('Error al eliminar todas las notificaciones:', error);
+      Alert.alert('Error', 'No se pudieron eliminar todas las notificaciones');
+    }
+  };
 
-            await Promise.all(promises);
-            setNotificaciones(notificaciones.map(notif => ({ ...notif, seen: true })));
-            Alert.alert("Éxito", "Todas las notificaciones marcadas como leídas");
-        } catch (error) {
-            console.error("Error al marcar todas como vistas:", error);
-            Alert.alert("Error", "No se pudieron marcar todas como leídas");
-        }
-    };
+  // Abrir detalles de la notificación
+  const abrirDetalles = (notif) => {
+    setSelectedNotification(notif);
+    if (!notif.seen) {
+      marcarComoLeida(notif.id);
+    }
+    setModalVisible(true);
+  };
 
-    // Función para eliminar todas las notificaciones leídas
-    const eliminarTodasLeidas = async () => {
-        try {
-            const leidas = notificaciones.filter(notif => notif.seen);
-            const promises = leidas.map(notif => deleteDoc(doc(db, 'notificaciones', notif.id)));
+  // Función para ir al historial
+  const irAlHistorial = (notif) => {
+    if (!notif?.proyectoId) {
+      Alert.alert('Sin proyecto', 'Esta notificación no tiene proyecto asociado.');
+      return;
+    }
+    setModalVisible(false);
+    navigation.navigate('HistorialProyecto', { proyectoId: notif.proyectoId });
+  };
 
-            await Promise.all(promises);
-            setNotificaciones(notificaciones.filter(notif => !notif.seen));
-            Alert.alert("Éxito", "Notificaciones leídas eliminadas");
-        } catch (error) {
-            console.error("Error al eliminar notificaciones leídas:", error);
-            Alert.alert("Error", "No se pudieron eliminar las notificaciones leídas");
-        }
-    };
+  // Refrescar manualmente
+  const onRefresh = () => {
+    setRefreshing(true);
+    obtenerNotificaciones();
+  };
 
-    // Obtener icono según el tipo o estado
-    const obtenerIcono = (notificacion) => {
-        const { type, estado } = notificacion;
-        
-        if (estado) {
-            switch(estado.toLowerCase()) {
-                case 'en progreso':
-                    return { name: 'autorenew', color: '#FF9800' };
-                case 'entrega tardía':
-                    return { name: 'warning', color: '#F44336' };
-                case 'finalizado':
-                    return { name: 'check-circle', color: '#4CAF50' };
-                case 'pendiente':
-                    return { name: 'schedule', color: '#9E9E9E' };
-                default:
-                    return { name: 'notifications', color: '#3A7BD5' };
-            }
-        }
-        
-        if (type === 'subtarea') {
-            return { name: 'assignment', color: '#3A7BD5' };
-        }
-        
-        return { name: 'notifications', color: '#3A7BD5' };
-    };
+  useEffect(() => {
+    obtenerNotificaciones();
+  }, []);
 
-    // Formatear fecha correctamente
-    const formatearFecha = (fecha) => {
-        if (!fecha) return 'Fecha no disponible';
-        
-        try {
-            // Si es un timestamp de Firestore
-            if (fecha.toDate) {
-                fecha = fecha.toDate();
-            }
-            
-            // Si es un string, convertirlo a Date
-            if (typeof fecha === 'string') {
-                fecha = new Date(fecha);
-            }
-            
-            // Verificar si es una fecha válida
-            if (isNaN(fecha.getTime())) {
-                return 'Fecha inválida';
-            }
-            
-            return fecha.toLocaleDateString('es-ES', {
-                day: 'numeric',
-                month: 'short',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-        } catch (error) {
-            console.error("Error al formatear fecha:", error, fecha);
-            return 'Fecha inválida';
-        }
-    };
-
-    // Abrir detalles de notificación
-    const abrirDetalles = (notificacion) => {
-        setSelectedNotification(notificacion);
-        setModalVisible(true);
-        
-        // Marcar como vista si no lo está
-        if (!notificacion.seen) {
-            marcarComoVista(notificacion.id);
-        }
-    };
-
-    useEffect(() => {
-        obtenerNotificaciones();
-    }, []);
-
-    // Función para renderizar cada item
-    const renderItem = ({ item }) => {
-        const icono = obtenerIcono(item);
-        
-        return (
-            <TouchableOpacity onPress={() => abrirDetalles(item)}>
-                <View style={[
-                    styles.notificationCard,
-                    item.seen ? styles.seenCard : styles.unseenCard
-                ]}>
-                    <View style={styles.notificationHeader}>
-                        <View style={[
-                            styles.notificationIcon,
-                            { backgroundColor: icono.color }
-                        ]}>
-                            <Icon
-                                name={icono.name}
-                                size={20}
-                                color="#FFF"
-                            />
-                        </View>
-                        <View style={styles.notificationContent}>
-                            <Text style={[
-                                styles.notificationMessage,
-                                item.seen ? styles.seenText : styles.unseenText
-                            ]} numberOfLines={2}>
-                                {item.message}
-                            </Text>
-                            <Text style={styles.notificationDate}>
-                                {formatearFecha(item.date)}
-                            </Text>
-                        </View>
-                        {!item.seen && <View style={styles.unreadDot} />}
-                    </View>
-
-                    <View style={styles.notificationActions}>
-                        {!item.seen && (
-                            <TouchableOpacity
-                                style={styles.actionButton}
-                                onPress={() => marcarComoVista(item.id)}
-                            >
-                                <LinearGradient
-                                    colors={['#3A7BD5', '#00D2FF']}
-                                    style={styles.gradientButtonSmall}
-                                    start={{ x: 0, y: 0 }}
-                                    end={{ x: 1, y: 0 }}
-                                >
-                                    <Text style={styles.actionButtonText}>Leído</Text>
-                                    <Icon name="check" size={16} color="#FFF" />
-                                </LinearGradient>
-                            </TouchableOpacity>
-                        )}
-                        <TouchableOpacity
-                            style={styles.deleteButton}
-                            onPress={() => eliminarNotificacion(item.id)}
-                        >
-                            <LinearGradient
-                                colors={['#FF5252', '#FF7B7B']}
-                                style={styles.gradientButtonSmall}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 0 }}
-                            >
-                                <Text style={styles.actionButtonText}>Eliminar</Text>
-                                <Icon name="delete" size={16} color="#FFF" />
-                            </LinearGradient>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </TouchableOpacity>
-        );
-    };
-
+  if (loading) {
     return (
-        <View style={styles.container}>
-            <StatusBar barStyle="light-content" backgroundColor="#3A7BD5" />
-
-            {/* Header */}
-            <LinearGradient
-                colors={['#3A7BD5', '#2980b9']}
-                style={styles.header}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-            >
-                <TouchableOpacity
-                    style={styles.backButton}
-                    onPress={() => navigation.goBack()}
-                >
-                    <Icon name="arrow-back" size={24} color="#FFF" />
-                </TouchableOpacity>
-
-                <View style={styles.headerTitleContainer}>
-                    <Text style={styles.headerTitle}>Notificaciones</Text>
-                    {notificaciones.length > 0 && (
-                        <Text style={styles.notificationCount}>
-                            {notificaciones.filter(n => !n.seen).length} sin leer
-                        </Text>
-                    )}
-                </View>
-
-                <View style={styles.headerActions}>
-                    <TouchableOpacity
-                        style={styles.refreshButton}
-                        onPress={obtenerNotificaciones}
-                    >
-                        <Icon name="refresh" size={24} color="#FFF" />
-                    </TouchableOpacity>
-
-                    {notificaciones.filter(n => !n.seen).length > 0 && (
-                        <TouchableOpacity
-                            style={styles.markAllButton}
-                            onPress={marcarTodasComoVistas}
-                        >
-                            <Icon name="done-all" size={24} color="#FFF" />
-                        </TouchableOpacity>
-                    )}
-                    
-                    {notificaciones.filter(n => n.seen).length > 0 && (
-                        <TouchableOpacity
-                            style={styles.deleteAllButton}
-                            onPress={eliminarTodasLeidas}
-                        >
-                            <Icon name="delete-sweep" size={24} color="#FFF" />
-                        </TouchableOpacity>
-                    )}
-                </View>
-            </LinearGradient>
-
-            {/* Content */}
-            <View style={styles.content}>
-                {loading ? (
-                    <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color="#3A7BD5" />
-                        <Text style={styles.loadingText}>Cargando notificaciones...</Text>
-                    </View>
-                ) : (
-                    <FlatList
-                        data={notificaciones}
-                        keyExtractor={(item) => item.id}
-                        renderItem={renderItem}
-                        refreshControl={
-                            <RefreshControl
-                                refreshing={refreshing}
-                                onRefresh={obtenerNotificaciones}
-                                colors={['#3A7BD5']}
-                                tintColor="#3A7BD5"
-                            />
-                        }
-                        ListEmptyComponent={
-                            <View style={styles.emptyContainer}>
-                                <Icon name="notifications-off" size={60} color="#CFD8DC" />
-                                <Text style={styles.emptyTitle}>No hay notificaciones</Text>
-                                <Text style={styles.emptySubtitle}>
-                                    Cuando tengas nuevas notificaciones, aparecerán aquí
-                                </Text>
-                                <TouchableOpacity
-                                    style={styles.refreshEmptyButton}
-                                    onPress={obtenerNotificaciones}
-                                >
-                                    <Text style={styles.refreshEmptyText}>Actualizar</Text>
-                                </TouchableOpacity>
-                            </View>
-                        }
-                        contentContainerStyle={notificaciones.length === 0 && styles.emptyListContainer}
-                        showsVerticalScrollIndicator={false}
-                    />
-                )}
-            </View>
-
-            {/* Modal de detalles de notificación */}
-            <Modal
-                animationType="slide"
-                transparent={true}
-                visible={modalVisible}
-                onRequestClose={() => setModalVisible(false)}
-            >
-                <View style={styles.modalContainer}>
-                    <View style={styles.modalContent}>
-                        {selectedNotification && (
-                            <>
-                                <View style={styles.modalHeader}>
-                                    <View style={[
-                                        styles.modalIcon,
-                                        { backgroundColor: obtenerIcono(selectedNotification).color }
-                                    ]}>
-                                        <Icon
-                                            name={obtenerIcono(selectedNotification).name}
-                                            size={24}
-                                            color="#FFF"
-                                        />
-                                    </View>
-                                    <Text style={styles.modalTitle}>Detalles de notificación</Text>
-                                    <TouchableOpacity 
-                                        style={styles.closeButton}
-                                        onPress={() => setModalVisible(false)}
-                                    >
-                                        <Icon name="close" size={24} color="#78909C" />
-                                    </TouchableOpacity>
-                                </View>
-                                
-                                <View style={styles.modalBody}>
-                                    <Text style={styles.modalMessage}>
-                                        {selectedNotification.message}
-                                    </Text>
-                                    
-                                    <Text style={styles.modalDate}>
-                                        {formatearFecha(selectedNotification.date)}
-                                    </Text>
-                                    
-                                    {selectedNotification.detalles && (
-                                        <View style={styles.detallesContainer}>
-                                            <Text style={styles.detallesTitle}>Cambios realizados:</Text>
-                                            <Text style={styles.detallesText}>
-                                                {selectedNotification.detalles}
-                                            </Text>
-                                        </View>
-                                    )}
-                                    
-                                    {selectedNotification.estado && (
-                                        <View style={styles.estadoContainer}>
-                                            <Text style={styles.estadoTitle}>Estado:</Text>
-                                            <View style={[
-                                                styles.estadoBadge,
-                                                { backgroundColor: obtenerIcono(selectedNotification).color }
-                                            ]}>
-                                                <Text style={styles.estadoText}>
-                                                    {selectedNotification.estado}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                    )}
-                                </View>
-                                
-                                <View style={styles.modalActions}>
-                                    <TouchableOpacity
-                                        style={styles.modalButton}
-                                        onPress={() => eliminarNotificacion(selectedNotification.id)}
-                                    >
-                                        <LinearGradient
-                                            colors={['#FF5252', '#FF7B7B']}
-                                            style={styles.modalGradientButton}
-                                            start={{ x: 0, y: 0 }}
-                                            end={{ x: 1, y: 0 }}
-                                        >
-                                            <Text style={styles.modalButtonText}>Eliminar</Text>
-                                            <Icon name="delete" size={18} color="#FFF" />
-                                        </LinearGradient>
-                                    </TouchableOpacity>
-                                    
-                                    <TouchableOpacity
-                                        style={styles.modalButtonSecondary}
-                                        onPress={() => setModalVisible(false)}
-                                    >
-                                        <Text style={styles.modalButtonSecondaryText}>Cerrar</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </>
-                        )}
-                    </View>
-                </View>
-            </Modal>
-        </View>
+      <View style={styles.centerContainer}>
+        <ActivityIndicator size="large" color="#3A7BD5" />
+        <Text style={styles.loadingText}>Cargando notificaciones...</Text>
+      </View>
     );
+  }
+
+  return (
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#3A7BD5" />
+      
+      <LinearGradient
+        colors={['#3A7BD5', '#00D2FF']}
+        style={styles.header}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+      >
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
+        </TouchableOpacity>
+
+        <Text style={styles.headerTitle}>Notificaciones</Text>
+
+        <View style={styles.headerButtons}>
+          <TouchableOpacity onPress={marcarTodasComoLeidas} style={styles.headerIconButton}>
+            <MaterialIcons name="drafts" size={22} color="#FFFFFF" />
+          </TouchableOpacity>
+          
+          <TouchableOpacity onPress={onRefresh} style={styles.headerIconButton}>
+            <MaterialIcons name="refresh" size={22} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </LinearGradient>
+
+      {notificaciones.length > 0 && (
+        <TouchableOpacity 
+          style={styles.clearAllButton}
+          onPress={() => {
+            Alert.alert(
+              "Eliminar todas",
+              "¿Estás seguro de que quieres eliminar todas las notificaciones?",
+              [
+                { text: "Cancelar", style: "cancel" },
+                { text: "Eliminar", onPress: eliminarTodas, style: "destructive" }
+              ]
+            );
+          }}
+        >
+          <Text style={styles.clearAllText}>Eliminar todas</Text>
+          <MaterialIcons name="delete-sweep" size={20} color="#F44336" />
+        </TouchableOpacity>
+      )}
+
+      <FlatList
+        data={notificaciones}
+        keyExtractor={(item) => item.id}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        contentContainerStyle={notificaciones.length === 0 && styles.emptyContainer}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <MaterialIcons name="notifications-off" size={60} color="#CFD8DC" />
+            <Text style={styles.emptyTitle}>No tienes notificaciones</Text>
+            <Text style={styles.emptySubtitle}>Las notificaciones aparecerán aquí</Text>
+          </View>
+        }
+        renderItem={({ item }) => (
+          <TouchableOpacity 
+            onPress={() => item.proyectoId ? irAlHistorial(item) : abrirDetalles(item)}
+            style={[styles.notificationItem, !item.seen && styles.unreadItem]}
+          >
+            <View style={styles.notificationIcon}>
+              <MaterialIcons 
+                name={item.type === 'subtarea_estado' ? 'assignment' : 'notifications'} 
+                size={24} 
+                color={!item.seen ? '#3A7BD5' : '#78909C'} 
+              />
+              {!item.seen && <View style={styles.unreadDot} />}
+            </View>
+            
+            <View style={styles.notificationContent}>
+              <Text style={[styles.notificationMessage, !item.seen && styles.unreadMessage]}>
+                {item.message}
+              </Text>
+              <Text style={styles.notificationDate}>
+                {item.date ? item.date.toLocaleDateString('es-ES', {
+                  day: '2-digit', month: '2-digit', year: 'numeric',
+                  hour: '2-digit', minute: '2-digit'
+                }) : 'Fecha no disponible'}
+              </Text>
+              
+              {item.estado && (
+                <View style={[styles.statusBadge, { backgroundColor: getEstadoColor(item.estado) + '20' }]}>
+                  <Text style={[styles.statusText, { color: getEstadoColor(item.estado) }]}>
+                    {item.estado}
+                  </Text>
+                </View>
+              )}
+            </View>
+            
+            <TouchableOpacity 
+              onPress={() => eliminarNotificacion(item.id)}
+              style={styles.deleteButton}
+            >
+              <MaterialIcons name="close" size={20} color="#B0BEC5" />
+            </TouchableOpacity>
+          </TouchableOpacity>
+        )}
+      />
+
+      {/* Modal de detalles de notificación */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Detalles de notificación</Text>
+            
+            {selectedNotification && (
+              <>
+                <View style={styles.modalIcon}>
+                  <MaterialIcons 
+                    name={selectedNotification.type === 'subtarea_estado' ? 'assignment' : 'notifications'} 
+                    size={36} 
+                    color="#3A7BD5" 
+                  />
+                </View>
+                
+                <Text style={styles.modalMessage}>{selectedNotification.message}</Text>
+                
+                <Text style={styles.modalDate}>
+                  {selectedNotification.date ? selectedNotification.date.toLocaleString('es-ES', {
+                    day: '2-digit', month: '2-digit', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit'
+                  }) : 'Fecha no disponible'}
+                </Text>
+                
+                <View style={styles.modalActions}>
+                  {/* Botón para ir al historial si tiene proyectoId */}
+                  {selectedNotification.proyectoId && (
+                    <TouchableOpacity
+                      style={styles.modalButton}
+                      onPress={() => irAlHistorial(selectedNotification)}
+                    >
+                      <LinearGradient
+                        colors={['#3A7BD5', '#00D2FF']}
+                        style={styles.modalGradientButton}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                      >
+                        <Text style={styles.modalButtonText}>Ir al historial</Text>
+                        <MaterialIcons name="open-in-new" size={18} color="#FFF" />
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  )}
+                  
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.deleteButtonModal]}
+                    onPress={() => {
+                      Alert.alert(
+                        "Eliminar notificación",
+                        "¿Estás seguro de que quieres eliminar esta notificación?",
+                        [
+                          { text: "Cancelar", style: "cancel" },
+                          { text: "Eliminar", onPress: () => eliminarNotificacion(selectedNotification.id), style: "destructive" }
+                        ]
+                      );
+                    }}
+                  >
+                    <Text style={styles.deleteButtonText}>Eliminar</Text>
+                    <MaterialIcons name="delete" size={18} color="#F44336" />
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.cancelButtonModal]}
+                    onPress={() => setModalVisible(false)}
+                  >
+                    <Text style={styles.cancelButtonText}>Cerrar</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+};
+
+// Función auxiliar para colores de estado (debe coincidir con la de SubtareasMiembro)
+const getEstadoColor = (estado) => {
+  switch (estado) {
+    case 'Pendiente': return '#FFA000';
+    case 'En progreso': return '#2196F3';
+    case 'Finalizado': return '#4CAF50';
+    case 'Entrega tardía': return '#F44336';
+    default: return '#9E9E9E';
+  }
 };
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#F0F5FF',
-    },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingTop: Platform.OS === 'ios' ? 50 : 40,
-        paddingBottom: 20,
-        borderBottomLeftRadius: 20,
-        borderBottomRightRadius: 20,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
-        elevation: 8,
-    },
-    backButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: 'rgba(255, 255, 255, 0.2)',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: 10,
-    },
-    headerTitleContainer: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    headerTitle: {
-        fontSize: 22,
-        fontWeight: '800',
-        color: '#FFFFFF',
-        textShadowColor: 'rgba(0, 0, 0, 0.2)',
-        textShadowOffset: { width: 0, height: 1 },
-        textShadowRadius: 2,
-    },
-    notificationCount: {
-        fontSize: 12,
-        color: 'rgba(255, 255, 255, 0.9)',
-        marginTop: 2,
-    },
-    headerActions: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-    },
-    refreshButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: 'rgba(255, 255, 255, 0.2)',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    markAllButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: 'rgba(255, 255, 255, 0.2)',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    deleteAllButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: 'rgba(255, 255, 255, 0.2)',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    content: {
-        flex: 1,
-        padding: 16,
-    },
-    loadingContainer: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    loadingText: {
-        marginTop: 16,
-        color: '#78909C',
-        fontSize: 16,
-        fontWeight: '500',
-    },
-    notificationCard: {
-        backgroundColor: '#FFFFFF',
-        borderRadius: 16,
-        padding: 20,
-        marginBottom: 16,
-        shadowColor: '#3A7BD5',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 3,
-        borderWidth: 1,
-    },
-    unseenCard: {
-        borderColor: 'rgba(58, 123, 213, 0.3)',
-    },
-    seenCard: {
-        borderColor: 'rgba(58, 123, 213, 0.1)',
-        opacity: 0.8,
-    },
-    notificationHeader: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        marginBottom: 16,
-    },
-    notificationIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 3,
-        elevation: 2,
-    },
-    notificationContent: {
-        flex: 1,
-    },
-    notificationMessage: {
-        fontSize: 16,
-        fontWeight: '600',
-        lineHeight: 22,
-        marginBottom: 6,
-    },
-    unseenText: {
-        color: '#2C3E50',
-    },
-    seenText: {
-        color: '#78909C',
-    },
-    notificationDate: {
-        fontSize: 13,
-        color: '#78909C',
-        fontWeight: '500',
-    },
-    unreadDot: {
-        width: 12,
-        height: 12,
-        borderRadius: 6,
-        backgroundColor: '#FF5252',
-        marginLeft: 8,
-        marginTop: 4,
-    },
-    notificationActions: {
-        flexDirection: 'row',
-        justifyContent: 'flex-end',
-        gap: 10,
-    },
-    actionButton: {
-        borderRadius: 12,
-        overflow: 'hidden',
-        flex: 1,
-    },
-    deleteButton: {
-        borderRadius: 12,
-        overflow: 'hidden',
-        flex: 1,
-    },
-    gradientButtonSmall: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 10,
-        gap: 6,
-    },
-    actionButtonText: {
-        color: '#FFFFFF',
-        fontWeight: '600',
-        fontSize: 12,
-    },
-    emptyListContainer: {
-        flexGrow: 1,
-        justifyContent: 'center',
-    },
-    emptyContainer: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 40,
-    },
-    emptyTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#90A4AE',
-        marginTop: 20,
-        marginBottom: 8,
-    },
-    emptySubtitle: {
-        fontSize: 14,
-        color: '#B0BEC5',
-        textAlign: 'center',
-        lineHeight: 20,
-        marginBottom: 24,
-    },
-    refreshEmptyButton: {
-        backgroundColor: '#3A7BD5',
-        borderRadius: 12,
-        paddingHorizontal: 24,
-        paddingVertical: 12,
-    },
-    refreshEmptyText: {
-        color: '#FFFFFF',
-        fontWeight: '600',
-        fontSize: 14,
-    },
-    // Estilos del modal
-    modalContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    },
-    modalContent: {
-        width: '90%',
-        backgroundColor: 'white',
-        borderRadius: 20,
-        padding: 20,
-        shadowColor: '#000',
-        shadowOffset: {
-            width: 0,
-            height: 2
-        },
-        shadowOpacity: 0.25,
-        shadowRadius: 4,
-        elevation: 5
-    },
-    modalHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 20,
-    },
-    modalIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: 12,
-    },
-    modalTitle: {
-        flex: 1,
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#2C3E50',
-    },
-    closeButton: {
-        padding: 4,
-    },
-    modalBody: {
-        marginBottom: 20,
-    },
-    modalMessage: {
-        fontSize: 16,
-        color: '#2C3E50',
-        marginBottom: 10,
-        lineHeight: 22,
-    },
-    modalDate: {
-        fontSize: 14,
-        color: '#78909C',
-        marginBottom: 15,
-    },
-    detallesContainer: {
-        marginBottom: 15,
-        padding: 10,
-        backgroundColor: '#F5F5F5',
-        borderRadius: 8,
-    },
-    detallesTitle: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#3A7BD5',
-        marginBottom: 5,
-    },
-    detallesText: {
-        fontSize: 14,
-        color: '#546E7A',
-        lineHeight: 20,
-    },
-    estadoContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    estadoTitle: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#3A7BD5',
-        marginRight: 10,
-    },
-    estadoBadge: {
-        paddingHorizontal: 10,
-        paddingVertical: 5,
-        borderRadius: 12,
-    },
-    estadoText: {
-        color: 'white',
-        fontSize: 12,
-        fontWeight: '600',
-    },
-    modalActions: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-    },
-    modalButton: {
-        flex: 1,
-        marginRight: 10,
-        borderRadius: 12,
-        overflow: 'hidden',
-    },
-    modalGradientButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 12,
-        gap: 6,
-    },
-    modalButtonText: {
-        color: '#FFFFFF',
-        fontWeight: '600',
-        fontSize: 14,
-    },
-    modalButtonSecondary: {
-        flex: 1,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#3A7BD5',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 12,
-    },
-    modalButtonSecondaryText: {
-        color: '#3A7BD5',
-        fontWeight: '600',
-        fontSize: 14,
-    },
+  container: {
+    flex: 1,
+    backgroundColor: '#F8FAFF',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 44,
+    paddingBottom: 16,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    shadowColor: '#3A7BD5',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  backButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 19,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  headerButtons: {
+    flexDirection: 'row',
+  },
+  headerIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+  },
+  clearAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    margin: 12,
+    backgroundColor: '#FFF',
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  clearAllText: {
+    color: '#F44336',
+    fontWeight: '600',
+    marginRight: 8,
+  },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#3A7BD5',
+  },
+  emptyContainer: {
+    flex: 1,
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+    marginTop: 50,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#90A4AE',
+    marginTop: 12,
+  },
+  emptySubtitle: {
+    fontSize: 13,
+    color: '#B0BEC5',
+    textAlign: 'center',
+    marginTop: 6,
+    lineHeight: 18,
+  },
+  notificationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    padding: 16,
+    marginHorizontal: 12,
+    marginVertical: 6,
+    borderRadius: 14,
+    shadowColor: '#3A7BD5',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(58, 123, 213, 0.04)',
+  },
+  unreadItem: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#3A7BD5',
+  },
+  notificationIcon: {
+    marginRight: 12,
+    position: 'relative',
+  },
+  unreadDot: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#3A7BD5',
+  },
+  notificationContent: {
+    flex: 1,
+  },
+  notificationMessage: {
+    fontSize: 14,
+    color: '#546E7A',
+    lineHeight: 20,
+    marginBottom: 6,
+  },
+  unreadMessage: {
+    fontWeight: '600',
+    color: '#2C3E50',
+  },
+  notificationDate: {
+    fontSize: 12,
+    color: '#78909C',
+    marginBottom: 8,
+  },
+  statusBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  statusText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  deleteButton: {
+    padding: 8,
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 14,
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 20,
+    width: '100%',
+    maxHeight: '80%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  modalTitle: {
+    fontSize: 19,
+    fontWeight: '700',
+    color: '#3A7BD5',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  modalIcon: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalMessage: {
+    fontSize: 15,
+    color: '#37474F',
+    lineHeight: 22,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  modalDate: {
+    fontSize: 14,
+    color: '#78909C',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  modalActions: {
+    marginTop: 16,
+  },
+  modalButton: {
+    marginVertical: 8,
+  },
+  modalGradientButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 14,
+    borderRadius: 10,
+  },
+  modalButtonText: {
+    color: 'white',
+    fontWeight: '700',
+    fontSize: 14,
+    marginRight: 8,
+  },
+  deleteButtonModal: {
+    borderWidth: 1.2,
+    borderColor: '#F44336',
+    borderRadius: 10,
+    padding: 14,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  deleteButtonText: {
+    color: '#F44336',
+    fontWeight: '700',
+    fontSize: 14,
+    marginRight: 8,
+  },
+  cancelButtonModal: {
+    backgroundColor: '#F1F4F8',
+    borderRadius: 10,
+    padding: 14,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#607D8B',
+    fontWeight: '700',
+    fontSize: 14,
+  },
 });
 
 export default Notificaciones;

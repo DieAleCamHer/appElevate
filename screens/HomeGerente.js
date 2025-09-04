@@ -37,7 +37,19 @@ import {
 import { db, auth } from '../firebaseConfig';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
+
+// Puntos de referencia para responsive design
+const guidelineBaseWidth = 375;
+const guidelineBaseHeight = 812;
+
+// Funciones para escalar proporcionalmente
+const scale = size => width / guidelineBaseWidth * size;
+const verticalScale = size => height / guidelineBaseHeight * size;
+const moderateScale = (size, factor = 0.5) => size + (scale(size) - size) * factor;
+
+// Función para detectar orientación
+const isPortrait = () => height >= width;
 
 const HomeGerente = ({ route, navigation }) => {
   const { userId } = route.params || {};
@@ -66,7 +78,7 @@ const HomeGerente = ({ route, navigation }) => {
   const [notificaciones, setNotificaciones] = useState([]);
   const [menuVisible, setMenuVisible] = useState(false);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
-  const slideAnim = useRef(new Animated.Value(-300)).current;
+  const slideAnim = useRef(new Animated.Value(-width)).current;
   const [showFloatingNotification, setShowFloatingNotification] = useState(false);
   const [lastNotificationCount, setLastNotificationCount] = useState(0);
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -174,7 +186,7 @@ const HomeGerente = ({ route, navigation }) => {
   const toggleMenu = () => {
     if (menuVisible) {
       Animated.timing(slideAnim, {
-        toValue: -300,
+        toValue: -width,
         duration: 300,
         useNativeDriver: true,
       }).start(() => setMenuVisible(false));
@@ -464,14 +476,14 @@ const HomeGerente = ({ route, navigation }) => {
       >
         <View style={styles.headerLeft}>
           <TouchableOpacity onPress={toggleMenu} style={styles.menuButton}>
-            <Icon name="menu" size={28} color="#FFFFFF" />
+            <Icon name="menu" size={moderateScale(28)} color="#FFFFFF" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Panel de Gerente</Text>
         </View>
 
         <View style={styles.headerRight}>
           <TouchableOpacity onPress={obtenerProyectos} style={styles.refreshButton}>
-            <Icon name="refresh" size={24} color="#FFFFFF" />
+            <Icon name="refresh" size={moderateScale(24)} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
       </LinearGradient>
@@ -496,7 +508,7 @@ const HomeGerente = ({ route, navigation }) => {
               <View style={styles.menuHeader}>
                 <Text style={styles.menuTitle}>Menú</Text>
                 <TouchableOpacity onPress={toggleMenu} style={styles.closeMenuButton}>
-                  <Icon name="close" size={24} color="#FFFFFF" />
+                  <Icon name="close" size={moderateScale(24)} color="#FFFFFF" />
                 </TouchableOpacity>
               </View>
 
@@ -506,7 +518,7 @@ const HomeGerente = ({ route, navigation }) => {
                   onPress={() => handleMenuAction('notifications')}
                 >
                   <View style={styles.menuItemLeft}>
-                    <Icon name="notifications" size={22} color="#FFFFFF" />
+                    <Icon name="notifications" size={moderateScale(22)} color="#FFFFFF" />
                     <Text style={styles.menuItemText}>Notificaciones</Text>
                   </View>
                   {unreadNotifications > 0 && (
@@ -521,7 +533,7 @@ const HomeGerente = ({ route, navigation }) => {
                   onPress={() => handleMenuAction('calendar')}
                 >
                   <View style={styles.menuItemLeft}>
-                    <Icon name="calendar-today" size={22} color="#FFFFFF" />
+                    <Icon name="calendar-today" size={moderateScale(22)} color="#FFFFFF" />
                     <Text style={styles.menuItemText}>Calendario</Text>
                   </View>
                 </TouchableOpacity>
@@ -533,7 +545,7 @@ const HomeGerente = ({ route, navigation }) => {
                   onPress={() => handleMenuAction('logout')}
                 >
                   <View style={styles.menuItemLeft}>
-                    <Icon name="exit-to-app" size={22} color="#FF6B6B" />
+                    <Icon name="exit-to-app" size={moderateScale(22)} color="#FF6B6B" />
                     <Text style={[styles.menuItemText, { color: '#FF6B6B' }]}>
                       Cerrar Sesión
                     </Text>
@@ -584,7 +596,7 @@ const HomeGerente = ({ route, navigation }) => {
               />
 
               <TouchableOpacity style={styles.dateButton} onPress={() => setShowCreateDatePicker(true)}>
-                <Icon name="event" size={20} color="#3A7BD5" />
+                <Icon name="event" size={moderateScale(20)} color="#3A7BD5" />
                 <Text style={styles.dateButtonText}>
                   {fechaEntrega.toLocaleDateString() || 'Seleccionar fecha'}
                 </Text>
@@ -644,8 +656,8 @@ const HomeGerente = ({ route, navigation }) => {
                       >
                         <View style={styles.projectHeader}>
                           <Text style={styles.projectName}>{item.nombre}</Text>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <Icon name="event" size={16} color="#3A7BD5" />
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: moderateScale(6) }}>
+                            <Icon name="event" size={moderateScale(16)} color="#3A7BD5" />
                             <Text style={styles.projectDueDate}>
                               {new Date(item.fechaEntrega).toLocaleDateString()}
                             </Text>
@@ -668,7 +680,7 @@ const HomeGerente = ({ route, navigation }) => {
                       {/* BOTONES DE ACCIÓN */}
                       <View style={styles.projectActions}>
                         <TouchableOpacity style={styles.historyButton} onPress={() => handleVerHistorial(item)}>
-                          <Icon name="history" size={20} color="#FF9800" />
+                          <Icon name="history" size={moderateScale(20)} color="#FF9800" />
                         </TouchableOpacity>
 
                         <TouchableOpacity
@@ -681,7 +693,7 @@ const HomeGerente = ({ route, navigation }) => {
                             setEditModalVisible(true);
                           }}
                         >
-                          <Icon name="edit" size={20} color="#4CAF50" />
+                          <Icon name="edit" size={moderateScale(20)} color="#4CAF50" />
                         </TouchableOpacity>
 
                         <TouchableOpacity
@@ -692,11 +704,11 @@ const HomeGerente = ({ route, navigation }) => {
                             setModalAsignarVisible(true);
                           }}
                         >
-                          <Icon name="person-add" size={20} color="#3A7BD5" />
+                          <Icon name="person-add" size={moderateScale(20)} color="#3A7BD5" />
                         </TouchableOpacity>
 
                         <TouchableOpacity style={styles.membersButton} onPress={() => verMiembrosAsignados(item)}>
-                          <Icon name="people" size={20} color="#3A7BD5" />
+                          <Icon name="people" size={moderateScale(20)} color="#3A7BD5" />
                         </TouchableOpacity>
 
                         <TouchableOpacity
@@ -706,14 +718,14 @@ const HomeGerente = ({ route, navigation }) => {
                             setModalVisible(true);
                           }}
                         >
-                          <Icon name="delete" size={20} color="#e53935" />
+                          <Icon name="delete" size={moderateScale(20)} color="#e53935" />
                         </TouchableOpacity>
                       </View>
                     </View>
                   )}
                   ListEmptyComponent={
                     <View style={styles.emptyContainer}>
-                      <Icon name="folder" size={50} color="#90A4AE" />
+                      <Icon name="folder" size={moderateScale(50)} color="#90A4AE" />
                       <Text style={styles.emptyText}>No tienes proyectos aún</Text>
                     </View>
                   }
@@ -757,7 +769,7 @@ const HomeGerente = ({ route, navigation }) => {
                 {/* Icono con efecto neomórfico */}
                 <View style={styles.iconContainer}>
                   <View style={styles.iconBackground}>
-                    <Icon name="notifications" size={24} color="#7C4DFF" />
+                    <Icon name="notifications" size={moderateScale(24)} color="#7C4DFF" />
                   </View>
                   {unreadNotifications > 0 && (
                     <View style={styles.floatingNotificationBadge}>
@@ -777,7 +789,7 @@ const HomeGerente = ({ route, navigation }) => {
                   <View style={styles.notificationDivider} />
 
                   <View style={styles.subtitleContainer}>
-                    <Icon name="touch-app" size={16} color="rgba(255,255,255,0.9)" />
+                    <Icon name="touch-app" size={moderateScale(16)} color="rgba(255,255,255,0.9)" />
                     <Text style={styles.floatingNotificationSubtitle}>
                       Toca para ver detalles
                     </Text>
@@ -787,7 +799,7 @@ const HomeGerente = ({ route, navigation }) => {
                 {/* Flecha con contenedor circular */}
                 <View style={styles.arrowContainer}>
                   <View style={styles.arrowCircle}>
-                    <Icon name="arrow-forward" size={20} color="#7C4DFF" />
+                    <Icon name="arrow-forward" size={moderateScale(20)} color="#7C4DFF" />
                   </View>
                 </View>
               </View>
@@ -803,7 +815,7 @@ const HomeGerente = ({ route, navigation }) => {
             <Text style={styles.modalTitle}>Asignar Miembro</Text>
 
             <View style={styles.searchContainer}>
-              <Icon name="search" size={20} color="#90A4AE" style={styles.searchIcon} />
+              <Icon name="search" size={moderateScale(20)} color="#90A4AE" style={styles.searchIcon} />
               <TextInput
                 style={styles.searchInput}
                 placeholder="Buscar miembros..."
@@ -821,7 +833,7 @@ const HomeGerente = ({ route, navigation }) => {
                   style={[styles.memberItem, miembroSeleccionado === miembro.id && styles.selectedMember]}
                 >
                   <View style={styles.memberAvatar}>
-                    <Icon name="person" size={24} color="#FFF" />
+                    <Icon name="person" size={moderateScale(24)} color="#FFF" />
                   </View>
                   <View style={styles.memberInfo}>
                     <Text style={styles.memberName}>{miembro.nombre}</Text>
@@ -873,7 +885,7 @@ const HomeGerente = ({ route, navigation }) => {
                 membersList.map((miembro) => (
                   <View key={miembro.id} style={styles.memberListItem}>
                     <View style={styles.memberBullet}>
-                      <Icon name="person" size={16} color="#3A7BD5" />
+                      <Icon name="person" size={moderateScale(16)} color="#3A7BD5" />
                     </View>
                     <Text style={styles.memberListText}>
                       {miembro.nombre} (@{miembro.username})
@@ -886,7 +898,7 @@ const HomeGerente = ({ route, navigation }) => {
                         setShowMembersModal(false);
                       }}
                     >
-                      <Icon name="remove-circle" size={20} color="#e53935" />
+                      <Icon name="remove-circle" size={moderateScale(20)} color="#e53935" />
                     </TouchableOpacity>
                   </View>
                 ))
@@ -999,7 +1011,7 @@ const HomeGerente = ({ route, navigation }) => {
             />
 
             <TouchableOpacity style={styles.dateButton} onPress={() => setShowEditDatePicker(true)}>
-              <Icon name="event" size={20} color="#3A7BD5" />
+              <Icon name="event" size={moderateScale(20)} color="#3A7BD5" />
               <Text style={styles.dateButtonText}>{fechaEntrega.toLocaleDateString()}</Text>
             </TouchableOpacity>
 
@@ -1043,7 +1055,6 @@ const HomeGerente = ({ route, navigation }) => {
   );
 };
 
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1051,22 +1062,25 @@ const styles = StyleSheet.create({
   },
   background: {
     flex: 1,
+    width: '100%',
+    height: '100%',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 50 : 40,
-    paddingBottom: 16,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
+    paddingHorizontal: moderateScale(16),
+    paddingTop: Platform.OS === 'ios' ? verticalScale(50) : StatusBar.currentHeight + verticalScale(10),
+    paddingBottom: verticalScale(16),
+    borderBottomLeftRadius: moderateScale(20),
+    borderBottomRightRadius: moderateScale(20),
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: verticalScale(4) },
     shadowOpacity: 0.2,
-    shadowRadius: 8,
+    shadowRadius: moderateScale(8),
     elevation: 8,
     zIndex: 1000,
+    minHeight: verticalScale(80),
   },
   headerLeft: {
     flexDirection: 'row',
@@ -1078,26 +1092,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   menuButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: moderateScale(44),
+    height: moderateScale(44),
+    borderRadius: moderateScale(22),
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: moderateScale(12),
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: moderateScale(20),
     fontWeight: '700',
     color: '#FFFFFF',
     textShadowColor: 'rgba(0, 0, 0, 0.2)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
+    maxWidth: width * 0.6,
   },
   refreshButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: moderateScale(44),
+    height: moderateScale(44),
+    borderRadius: moderateScale(22),
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1117,40 +1132,41 @@ const styles = StyleSheet.create({
     left: 0,
     bottom: 0,
     width: width * 0.75,
+    maxWidth: moderateScale(300),
     zIndex: 2001,
   },
   menuGradient: {
     flex: 1,
-    paddingTop: Platform.OS === 'ios' ? 60 : 40,
+    paddingTop: Platform.OS === 'ios' ? verticalScale(60) : StatusBar.currentHeight + verticalScale(20),
   },
   menuHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: moderateScale(20),
+    paddingVertical: verticalScale(16),
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
   menuTitle: {
-    fontSize: 20,
+    fontSize: moderateScale(20),
     fontWeight: '700',
     color: '#FFFFFF',
   },
   closeMenuButton: {
-    padding: 4,
+    padding: moderateScale(4),
   },
   menuItems: {
-    padding: 20,
+    padding: moderateScale(20),
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 16,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    marginBottom: 8,
+    paddingVertical: verticalScale(16),
+    paddingHorizontal: moderateScale(12),
+    borderRadius: moderateScale(12),
+    marginBottom: moderateScale(8),
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
   },
   menuItemLeft: {
@@ -1159,173 +1175,174 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   menuItemText: {
-    fontSize: 16,
+    fontSize: moderateScale(16),
     fontWeight: '600',
     color: '#FFFFFF',
-    marginLeft: 12,
+    marginLeft: moderateScale(12),
   },
   menuBadge: {
     backgroundColor: '#FF5252',
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: moderateScale(24),
+    height: moderateScale(24),
+    borderRadius: moderateScale(12),
     alignItems: 'center',
     justifyContent: 'center',
+    minWidth: moderateScale(24),
   },
   menuBadgeText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: moderateScale(12),
     fontWeight: 'bold',
   },
   menuDivider: {
     height: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    marginVertical: 16,
+    marginVertical: verticalScale(16),
   },
   menuFooter: {
     position: 'absolute',
-    bottom: 20,
-    left: 20,
-    right: 20,
+    bottom: verticalScale(20),
+    left: moderateScale(20),
+    right: moderateScale(20),
     alignItems: 'center',
   },
   menuFooterText: {
-    fontSize: 12,
+    fontSize: moderateScale(12),
     color: 'rgba(255, 255, 255, 0.7)',
-    marginBottom: 4,
+    marginBottom: moderateScale(4),
   },
   scrollContent: {
-    paddingBottom: 16,
+    paddingBottom: verticalScale(16),
   },
   creationContainer: {
     backgroundColor: 'white',
-    borderRadius: 14,
-    padding: 16,
-    margin: 12,
-    marginBottom: 12,
+    borderRadius: moderateScale(14),
+    padding: moderateScale(16),
+    margin: moderateScale(12),
+    marginBottom: moderateScale(12),
     elevation: 2,
     shadowColor: '#3A7BD5',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
-    shadowRadius: 4,
+    shadowRadius: moderateScale(4),
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: moderateScale(16),
     fontWeight: '700',
     color: '#3A7BD5',
-    marginBottom: 12,
+    marginBottom: verticalScale(12),
   },
   input: {
     borderWidth: 1.2,
     borderColor: '#E3E9F1',
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 12,
-    fontSize: 14,
+    borderRadius: moderateScale(10),
+    padding: moderateScale(14),
+    marginBottom: verticalScale(12),
+    fontSize: moderateScale(14),
     color: '#263238',
     backgroundColor: '#F9FBFF',
-    minHeight: 20,
+    minHeight: verticalScale(20),
   },
   multilineInput: {
-    minHeight: 80,
+    minHeight: verticalScale(80),
     textAlignVertical: 'top',
-    paddingTop: 12,
+    paddingTop: verticalScale(12),
   },
   dateButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 14,
+    padding: moderateScale(14),
     borderWidth: 1.2,
     borderColor: '#E3E9F1',
-    borderRadius: 10,
-    marginBottom: 12,
+    borderRadius: moderateScale(10),
+    marginBottom: verticalScale(12),
     backgroundColor: '#F9FBFF',
   },
   dateButtonText: {
-    marginLeft: 10,
-    fontSize: 14,
+    marginLeft: moderateScale(10),
+    fontSize: moderateScale(14),
     color: '#263238',
     fontWeight: '500',
   },
   createButton: {
     backgroundColor: '#3A7BD5',
-    borderRadius: 10,
-    padding: 14,
+    borderRadius: moderateScale(10),
+    padding: verticalScale(14),
     alignItems: 'center',
     shadowColor: '#3A7BD5',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.2,
-    shadowRadius: 4,
+    shadowRadius: moderateScale(4),
     elevation: 3,
   },
   createButtonText: {
     color: '#FFFFFF',
     fontWeight: '600',
-    fontSize: 14,
+    fontSize: moderateScale(14),
   },
   projectsContainer: {
-    paddingHorizontal: 12,
+    paddingHorizontal: moderateScale(12),
   },
   projectsTitle: {
-    fontSize: 18,
+    fontSize: moderateScale(18),
     fontWeight: '700',
     color: '#3A7BD5',
-    marginBottom: 12,
-    marginLeft: 4,
+    marginBottom: verticalScale(12),
+    marginLeft: moderateScale(4),
   },
   projectCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    marginBottom: 12,
+    borderRadius: moderateScale(14),
+    marginBottom: verticalScale(12),
     shadowColor: '#3A7BD5',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
-    shadowRadius: 6,
+    shadowRadius: moderateScale(6),
     elevation: 2,
     borderWidth: 1,
     borderColor: 'rgba(58, 123, 213, 0.04)',
   },
   cardContent: {
-    padding: 16,
+    padding: moderateScale(16),
   },
   projectHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 10,
+    marginBottom: verticalScale(10),
   },
   projectName: {
-    fontSize: 16,
+    fontSize: moderateScale(16),
     fontWeight: '700',
     color: '#2C3E50',
     flex: 1,
-    marginRight: 10,
+    marginRight: moderateScale(10),
   },
   projectDueDate: {
     color: '#3A7BD5',
-    fontSize: 13,
+    fontSize: moderateScale(13),
     fontWeight: '600',
   },
   projectDescription: {
     color: '#5A6B7C',
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 14,
+    fontSize: moderateScale(13),
+    lineHeight: moderateScale(18),
+    marginBottom: verticalScale(14),
   },
   progressContainer: {
-    height: 6,
+    height: moderateScale(6),
     backgroundColor: '#ECEFF1',
-    borderRadius: 3,
-    marginBottom: 6,
+    borderRadius: moderateScale(3),
+    marginBottom: moderateScale(6),
     overflow: 'hidden',
   },
   progressBar: {
     height: '100%',
     backgroundColor: '#3A7BD5',
-    borderRadius: 3,
+    borderRadius: moderateScale(3),
   },
   progressText: {
-    fontSize: 11,
+    fontSize: moderateScale(11),
     color: '#78909C',
     fontWeight: '500',
     textAlign: 'right',
@@ -1333,57 +1350,57 @@ const styles = StyleSheet.create({
   projectActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    padding: 12,
+    padding: moderateScale(12),
     backgroundColor: '#FAFAFA',
     borderTopWidth: 1,
     borderTopColor: 'rgba(58, 123, 213, 0.08)',
-    borderBottomLeftRadius: 14,
-    borderBottomRightRadius: 14,
+    borderBottomLeftRadius: moderateScale(14),
+    borderBottomRightRadius: moderateScale(14),
   },
   actionButton: {
-    marginLeft: 10,
-    padding: 6,
+    marginLeft: moderateScale(10),
+    padding: moderateScale(6),
     backgroundColor: 'rgba(58, 123, 213, 0.1)',
-    borderRadius: 8,
+    borderRadius: moderateScale(8),
   },
   membersButton: {
-    marginLeft: 10,
-    padding: 6,
+    marginLeft: moderateScale(10),
+    padding: moderateScale(6),
     backgroundColor: 'rgba(58, 123, 213, 0.1)',
-    borderRadius: 8,
+    borderRadius: moderateScale(8),
   },
   editButton: {
-    marginLeft: 10,
-    padding: 6,
+    marginLeft: moderateScale(10),
+    padding: moderateScale(6),
     backgroundColor: 'rgba(76, 175, 80, 0.1)',
-    borderRadius: 8,
+    borderRadius: moderateScale(8),
   },
   deleteButton: {
-    marginLeft: 10,
-    padding: 6,
+    marginLeft: moderateScale(10),
+    padding: moderateScale(6),
     backgroundColor: 'rgba(229, 57, 53, 0.1)',
-    borderRadius: 8,
+    borderRadius: moderateScale(8),
   },
   historyButton: {
-    marginLeft: 10,
-    padding: 6,
+    marginLeft: moderateScale(10),
+    padding: moderateScale(6),
     backgroundColor: 'rgba(255, 152, 0, 0.1)',
-    borderRadius: 8,
+    borderRadius: moderateScale(8),
   },
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 30,
-    marginTop: 10,
+    padding: verticalScale(30),
+    marginTop: verticalScale(10),
   },
   emptyText: {
-    marginTop: 12,
+    marginTop: verticalScale(12),
     color: '#90A4AE',
-    fontSize: 14,
+    fontSize: moderateScale(14),
     fontWeight: '500',
   },
   loader: {
-    marginVertical: 30,
+    marginVertical: verticalScale(30),
   },
   modalOverlay: {
     flex: 1,
@@ -1393,10 +1410,11 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     backgroundColor: '#FFF',
-    borderRadius: 14,
-    width: '86%',
-    maxHeight: '78%',
-    padding: 18,
+    borderRadius: moderateScale(14),
+    width: width * 0.86,
+    maxWidth: moderateScale(400),
+    maxHeight: height * 0.78,
+    padding: moderateScale(18),
     elevation: 5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -1404,21 +1422,21 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
   },
   modalTitle: {
-    fontSize: 17,
+    fontSize: moderateScale(17),
     fontWeight: '700',
     color: '#3A7BD5',
-    marginBottom: 16,
+    marginBottom: verticalScale(16),
     textAlign: 'center',
   },
   modalScroll: {
-    maxHeight: '65%',
+    maxHeight: height * 0.65,
   },
   memberItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 6,
+    padding: moderateScale(10),
+    borderRadius: moderateScale(8),
+    marginBottom: moderateScale(6),
     backgroundColor: '#F5F5F5',
   },
   selectedMember: {
@@ -1428,64 +1446,65 @@ const styles = StyleSheet.create({
   },
   memberAvatar: {
     backgroundColor: '#3A7BD5',
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: moderateScale(34),
+    height: moderateScale(34),
+    borderRadius: moderateScale(17),
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
+    marginRight: moderateScale(10),
   },
   memberInfo: {
     flex: 1,
   },
   memberName: {
-    fontSize: 14,
+    fontSize: moderateScale(14),
     fontWeight: '600',
     color: '#263238',
   },
   memberUsername: {
-    fontSize: 12,
+    fontSize: moderateScale(12),
     color: '#78909C',
   },
   modalActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 16,
+    marginTop: verticalScale(16),
   },
   cancelButton: {
     flex: 1,
     backgroundColor: '#ECEFF1',
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: moderateScale(8),
+    padding: verticalScale(12),
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: moderateScale(8),
   },
   cancelButtonText: {
     color: '#78909C',
     fontWeight: '600',
-    fontSize: 14,
+    fontSize: moderateScale(14),
   },
   confirmButton: {
     flex: 1,
-    borderRadius: 8,
+    borderRadius: moderateScale(8),
     overflow: 'hidden',
   },
   gradientButton: {
-    padding: 12,
+    padding: verticalScale(12),
     alignItems: 'center',
     justifyContent: 'center',
   },
   confirmButtonText: {
     color: '#FFF',
     fontWeight: '600',
-    fontSize: 14,
+    fontSize: moderateScale(14),
   },
   customAlertContainer: {
     backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: moderateScale(16),
+    padding: moderateScale(20),
     width: '80%',
-    maxHeight: '65%',
+    maxWidth: moderateScale(400),
+    maxHeight: height * 0.65,
     elevation: 5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -1493,101 +1512,108 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
   },
   customAlertTitle: {
-    fontSize: 17,
+    fontSize: moderateScale(17),
     fontWeight: '700',
     color: '#3A7BD5',
     textAlign: 'center',
-    marginBottom: 14,
+    marginBottom: verticalScale(14),
   },
   customAlertScroll: {
-    maxHeight: '65%',
-    marginBottom: 16,
+    maxHeight: height * 0.65,
+    marginBottom: verticalScale(16),
   },
   memberListItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
-    paddingHorizontal: 4,
+    marginBottom: moderateScale(8),
+    paddingHorizontal: moderateScale(4),
   },
   memberBullet: {
-    marginRight: 8,
+    marginRight: moderateScale(8),
   },
   memberListText: {
-    fontSize: 14,
+    fontSize: moderateScale(14),
     color: '#546E7A',
     flex: 1,
-    lineHeight: 20,
+    lineHeight: moderateScale(20),
   },
   removeMemberButton: {
-    padding: 4,
-    marginLeft: 8,
+    padding: moderateScale(4),
+    marginLeft: moderateScale(8),
   },
   customAlertButton: {
     backgroundColor: '#3A7BD5',
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: moderateScale(8),
+    padding: verticalScale(12),
     alignItems: 'center',
   },
   customAlertButtonText: {
     color: 'white',
     fontWeight: '600',
-    fontSize: 14,
+    fontSize: moderateScale(14),
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(236, 239, 241, 0.7)',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    marginBottom: 12,
-    height: 40,
+    borderRadius: moderateScale(8),
+    paddingHorizontal: moderateScale(10),
+    marginBottom: verticalScale(12),
+    height: verticalScale(40),
   },
   searchIcon: {
-    marginRight: 8,
+    marginRight: moderateScale(8),
   },
   searchInput: {
     flex: 1,
-    height: 38,
+    height: verticalScale(38),
     color: '#263238',
-    fontSize: 14,
+    fontSize: moderateScale(14),
   },
   passwordInput: {
     backgroundColor: 'rgba(236, 239, 241, 0.7)',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-    fontSize: 14,
+    borderRadius: moderateScale(8),
+    padding: moderateScale(12),
+    marginBottom: verticalScale(12),
+    fontSize: moderateScale(14),
     color: '#263238',
   },
   deleteMessage: {
-    fontSize: 14,
+    fontSize: moderateScale(14),
     color: '#546E7A',
-    marginBottom: 16,
+    marginBottom: verticalScale(16),
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: moderateScale(20),
+  },
+  floatingNotification: {
+    position: 'absolute',
+    top: verticalScale(100),
+    left: moderateScale(20),
+    right: moderateScale(20),
+    zIndex: 3000,
   },
   floatingNotificationContent: {
     width: '100%',
-    borderRadius: 20,
+    borderRadius: moderateScale(20),
     overflow: 'hidden',
     shadowColor: '#7C4DFF',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.3,
-    shadowRadius: 15,
+    shadowRadius: moderateScale(15),
     elevation: 10,
   },
   floatingNotificationGradient: {
-    padding: 20,
+    padding: moderateScale(20),
     position: 'relative',
     overflow: 'hidden',
   },
   glowEffect: {
     position: 'absolute',
-    top: -50,
-    right: -50,
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    top: verticalScale(-50),
+    right: verticalScale(-50),
+    width: moderateScale(100),
+    height: moderateScale(100),
+    borderRadius: moderateScale(50),
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
   },
   notificationContent: {
@@ -1597,29 +1623,29 @@ const styles = StyleSheet.create({
   },
   iconContainer: {
     position: 'relative',
-    marginRight: 15,
+    marginRight: moderateScale(15),
   },
   iconBackground: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: moderateScale(50),
+    height: moderateScale(50),
+    borderRadius: moderateScale(25),
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.2,
-    shadowRadius: 5,
+    shadowRadius: moderateScale(5),
     elevation: 5,
   },
   floatingNotificationBadge: {
     position: 'absolute',
-    top: -5,
-    right: -5,
+    top: verticalScale(-5),
+    right: verticalScale(-5),
     backgroundColor: '#FF5252',
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: moderateScale(24),
+    height: moderateScale(24),
+    borderRadius: moderateScale(12),
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
@@ -1632,7 +1658,7 @@ const styles = StyleSheet.create({
   },
   floatingNotificationBadgeText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: moderateScale(12),
     fontWeight: 'bold',
   },
   floatingNotificationTextContainer: {
@@ -1640,10 +1666,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   floatingNotificationTitle: {
-    fontSize: 17,
+    fontSize: moderateScale(17),
     fontWeight: '800',
     color: '#FFFFFF',
-    marginBottom: 6,
+    marginBottom: verticalScale(6),
     textShadowColor: 'rgba(0, 0, 0, 0.2)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
@@ -1652,7 +1678,7 @@ const styles = StyleSheet.create({
   notificationDivider: {
     height: 2,
     backgroundColor: 'rgba(255, 255, 255, 0.4)',
-    marginVertical: 8,
+    marginVertical: verticalScale(8),
     width: '25%',
     borderRadius: 1,
   },
@@ -1661,26 +1687,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   floatingNotificationSubtitle: {
-    fontSize: 14,
+    fontSize: moderateScale(14),
     color: 'rgba(255, 255, 255, 0.9)',
-    marginLeft: 6,
+    marginLeft: moderateScale(6),
     fontWeight: '500',
     letterSpacing: 0.3,
   },
   arrowContainer: {
-    marginLeft: 10,
+    marginLeft: moderateScale(10),
   },
   arrowCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: moderateScale(40),
+    height: moderateScale(40),
+    borderRadius: moderateScale(20),
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
-    shadowRadius: 4,
+    shadowRadius: moderateScale(4),
     elevation: 4,
   },
 });

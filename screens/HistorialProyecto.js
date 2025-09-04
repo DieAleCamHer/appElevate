@@ -10,7 +10,6 @@ import {
   Modal,
   SafeAreaView,
   BackHandler,
-  Linking,
   Alert
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,7 +19,9 @@ import {
   query,
   where,
   getDocs,
-  orderBy
+  orderBy,
+  doc,
+  getDoc
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 
@@ -34,8 +35,13 @@ const HistorialProyecto = ({ route, navigation }) => {
   const [currentFilter, setCurrentFilter] = useState(null);
   const [usuarios, setUsuarios] = useState([]);
   const [estados, setEstados] = useState([]);
+  const [gerenteId, setGerenteId] = useState(null);
+  const [nombreProyecto, setNombreProyecto] = useState(proyectoNombre || '');
 
   useEffect(() => {
+    console.log("Parámetros recibidos:", { proyectoId, proyectoNombre });
+    obtenerGerenteProyecto();
+    asegurarNombreProyecto();
     obtenerHistorial();
 
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -44,42 +50,123 @@ const HistorialProyecto = ({ route, navigation }) => {
     });
 
     return () => backHandler.remove();
-  }, [navigation]);
+  }, [navigation, proyectoId]);
+
+  const obtenerGerenteProyecto = async () => {
+    try {
+      const proyectoDoc = await getDoc(doc(db, 'proyectos', proyectoId));
+      if (proyectoDoc.exists()) {
+        setGerenteId(proyectoDoc.data().creadorId);
+      }
+    } catch (error) {
+      console.error('Error al obtener gerente:', error);
+    }
+  };
+
+  const asegurarNombreProyecto = async () => {
+    try {
+      if (nombreProyecto) return;
+      const snap = await getDoc(doc(db, 'proyectos', proyectoId));
+      if (snap.exists()) {
+        const n = snap.data()?.nombre || 'Proyecto';
+        setNombreProyecto(n);
+      } else {
+        setNombreProyecto('Proyecto');
+      }
+    } catch (e) {
+      setNombreProyecto('Proyecto');
+    }
+  };
 
   const obtenerHistorial = async () => {
     try {
       setLoading(true);
+      console.log("Buscando historial para proyecto:", proyectoId);
+
       const q = query(
         collection(db, 'historial'),
         where('proyectoId', '==', proyectoId),
         orderBy('fechaCambio', 'desc')
       );
-      const snapshot = await getDocs(q);
-      const datos = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        fechaFormateada: new Date(doc.data().fechaCambio?.seconds * 1000).toLocaleString('es-ES')
-      }));
-      setHistorial(datos);
 
-      // Extraer usuarios y estados únicos para los filtros
+      const snapshot = await getDocs(q);
+      console.log("Número de documentos encontrados:", snapshot.size);
+
+      if (snapshot.empty) {
+        console.log("No se encontraron documentos en el historial");
+        setHistorial([]);
+        setLoading(false);
+        return;
+      }
+
+      const datos = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        console.log("Documento:", doc.id, data);
+
+        let fechaFormateada = 'Fecha no disponible';
+
+        // MANEJO DE DIFERENTES FORMATOS DE FECHA
+        if (data.fechaCambio) {
+          try {
+            // 1. Si es Timestamp de Firestore (con seconds)
+            if (data.fechaCambio.seconds !== undefined) {
+              fechaFormateada = new Date(data.fechaCambio.seconds * 1000).toLocaleString('es-ES');
+            } 
+            // 2. Si es Timestamp de Firestore (con toDate)
+            else if (data.fechaCambio.toDate && typeof data.fechaCambio.toDate === 'function') {
+              fechaFormateada = data.fechaCambio.toDate().toLocaleString('es-ES');
+            }
+            // 3. Si es string ISO (como "2025-09-04T02:57:24.204Z")
+            else if (typeof data.fechaCambio === 'string') {
+              fechaFormateada = new Date(data.fechaCambio).toLocaleString('es-ES');
+            }
+            // 4. Si es objeto Date directamente
+            else if (data.fechaCambio instanceof Date) {
+              fechaFormateada = data.fechaCambio.toLocaleString('es-ES');
+            }
+          } catch (error) {
+            console.error("Error formateando fecha:", error, data.fechaCambio);
+            fechaFormateada = 'Fecha inválida';
+          }
+        }
+
+        datos.push({
+          id: doc.id,
+          ...data,
+          fechaFormateada
+        });
+      });
+
+      setHistorial(datos);
+      console.log("Datos procesados:", datos);
+
+      // Extraer usuarios y estados únicos
       const usuariosUnicos = [...new Set(datos.map(item => item.usuarioUsername).filter(Boolean))];
       const estadosUnicos = [...new Set(datos.map(item => item.estadoNuevo).filter(Boolean))];
 
       setUsuarios(usuariosUnicos);
       setEstados(estadosUnicos);
+
     } catch (error) {
-      console.error('Error al obtener historial:', error);
+      console.error('Error completo al obtener historial:', error);
+      Alert.alert(
+        'Error',
+        `No se pudieron cargar los registros: ${error.message}`,
+        [{ text: 'Reintentar', onPress: obtenerHistorial }]
+      );
     } finally {
       setLoading(false);
     }
   };
 
   const historialFiltrado = historial.filter(item => {
-    const matchUsuario = filtroUsuario === '' ||
-      (item.usuarioUsername && item.usuarioUsername === filtroUsuario);
-    const matchEstado = filtroEstado === '' ||
-      (item.estadoNuevo && item.estadoNuevo === filtroEstado);
+    const matchUsuario =
+      filtroUsuario === '' || (item.usuarioUsername && item.usuarioUsername === filtroUsuario);
+
+    const matchEstado =
+      filtroEstado === '' || (item.estadoNuevo && item.estadoNuevo === filtroEstado);
+
     return matchUsuario && matchEstado;
   });
 
@@ -91,14 +178,17 @@ const HistorialProyecto = ({ route, navigation }) => {
         </View>
         <View style={styles.cardHeaderText}>
           <Text style={styles.cardTitle}>Registro de cambio</Text>
-          <Text style={styles.cardSubtitle}>{item.fechaFormateada}</Text>
+          <Text style={styles.cardSubtitle}>
+            {item.fechaFormateada !== 'Fecha no disponible' 
+              ? item.fechaFormateada 
+              : 'Fecha no disponible'}
+          </Text>
         </View>
       </View>
 
       <View style={styles.divider} />
 
       <View style={styles.detailSection}>
-        {/* Información de Tarea */}
         {item.tareaNombre && (
           <View style={styles.detailRow}>
             <Icon name="assignment" size={18} color="#00796B" style={styles.icon} />
@@ -109,7 +199,6 @@ const HistorialProyecto = ({ route, navigation }) => {
           </View>
         )}
 
-        {/* Información de Subtarea */}
         {item.subtareaNombre && (
           <View style={styles.detailRow}>
             <Icon name="list" size={18} color="#00897B" style={styles.icon} />
@@ -120,7 +209,6 @@ const HistorialProyecto = ({ route, navigation }) => {
           </View>
         )}
 
-        {/* Usuario */}
         <View style={styles.detailRow}>
           <Icon name="person" size={18} color="#5D4037" style={styles.icon} />
           <View style={styles.detailContent}>
@@ -132,7 +220,6 @@ const HistorialProyecto = ({ route, navigation }) => {
           </View>
         </View>
 
-        {/* Estado */}
         <View style={styles.detailRow}>
           <Icon name="flag" size={18} color={getStatusColor(item.estadoNuevo)} style={styles.icon} />
           <View style={styles.detailContent}>
@@ -145,7 +232,6 @@ const HistorialProyecto = ({ route, navigation }) => {
           </View>
         </View>
 
-        {/* Comentario */}
         {item.comentario && (
           <View style={styles.detailRow}>
             <Icon name="comment" size={18} color="#7B1FA2" style={styles.icon} />
@@ -233,8 +319,6 @@ const HistorialProyecto = ({ route, navigation }) => {
   return (
     <SafeAreaView style={styles.safeArea}>
       <LinearGradient colors={['#E3F2FD', '#BBDEFB', '#90CAF9']} style={styles.background}>
-
-        {/* Header con botón de retroceso */}
         <View style={styles.headerContainer}>
           <TouchableOpacity
             style={styles.backButton}
@@ -245,15 +329,13 @@ const HistorialProyecto = ({ route, navigation }) => {
 
           <View style={styles.headerContent}>
             <Text style={styles.title}>Historial de Cambios</Text>
-            <Text style={styles.projectName}>{proyectoNombre}</Text>
+            <Text style={styles.projectName}>{nombreProyecto || 'Proyecto'}</Text>
           </View>
         </View>
 
         <ScrollView contentContainerStyle={styles.container}>
-          {/* Filtros */}
           <View style={styles.filterSection}>
             <View style={styles.filterRow}>
-              {/* Filtro Usuario */}
               <TouchableOpacity
                 style={[styles.filterButton, filtroUsuario && styles.filterButtonActive]}
                 onPress={() => {
@@ -278,7 +360,6 @@ const HistorialProyecto = ({ route, navigation }) => {
                 )}
               </TouchableOpacity>
 
-              {/* Filtro Estado */}
               <TouchableOpacity
                 style={[styles.filterButton, filtroEstado && styles.filterButtonActive]}
                 onPress={() => {
@@ -304,7 +385,6 @@ const HistorialProyecto = ({ route, navigation }) => {
               </TouchableOpacity>
             </View>
 
-            {/* Contador y botón actualizar */}
             <View style={styles.filterFooter}>
               <Text style={styles.counterText}>
                 {historialFiltrado.length} de {historial.length} registros
@@ -321,7 +401,6 @@ const HistorialProyecto = ({ route, navigation }) => {
             </View>
           </View>
 
-          {/* Contenido */}
           {loading ? (
             <ActivityIndicator size="large" color="#00796B" style={styles.loader} />
           ) : historialFiltrado.length === 0 ? (
